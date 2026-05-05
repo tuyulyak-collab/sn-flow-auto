@@ -541,6 +541,76 @@
     });
   }
 
+  // ---- header actions (gear / floating) ----
+  // Gear: toggle the in-popup Settings overlay (slide-in panel that hosts
+  // the 'Safe Speed & Delays' controls). Floating: forward an
+  // SN_FLOW_OPEN_FLOATING command to the active Flow tab so its
+  // floating-monitor expands, then close the popup so the user can
+  // interact with the floating panel.
+  function openSettings() {
+    if (!els.settingsPanel) return;
+    els.settingsPanel.hidden = false;
+    els.settingsPanel.setAttribute("aria-hidden", "false");
+    refreshPacerState();
+  }
+  function closeSettings() {
+    if (!els.settingsPanel) return;
+    els.settingsPanel.hidden = true;
+    els.settingsPanel.setAttribute("aria-hidden", "true");
+  }
+  async function findFlowTab() {
+    return new Promise((resolve) => {
+      const patterns = [
+        "https://labs.google/*",
+        "https://*.labs.google/*",
+        "https://flow.google/*",
+        "https://*.flow.google/*",
+        "https://aitestkitchen.withgoogle.com/*",
+      ];
+      try {
+        chrome.tabs.query({ url: patterns }, (tabs) => {
+          if (!tabs || !tabs.length) { resolve(null); return; }
+          // Prefer the active tab in the current window if it matches; else first.
+          const active = tabs.find((t) => t.active);
+          resolve(active || tabs[0]);
+        });
+      } catch (_) { resolve(null); }
+    });
+  }
+  async function openFloatingPanel() {
+    const tab = await findFlowTab();
+    if (!tab) {
+      els.importInfo.textContent = "open a Flow tab first";
+      return;
+    }
+    try {
+      chrome.tabs.sendMessage(
+        tab.id,
+        { type: "SN_FLOW_OPEN_FLOATING" },
+        () => {
+          // Even if the content script isn't ready, focus the Flow tab so
+          // the user lands there. Then close the popup.
+          try { chrome.tabs.update(tab.id, { active: true }); } catch (_) {}
+          try { chrome.windows.update(tab.windowId, { focused: true }); } catch (_) {}
+          window.close();
+        },
+      );
+    } catch (_) {
+      window.close();
+    }
+  }
+  function bindHeaderActions() {
+    if (els.openSettings) els.openSettings.addEventListener("click", openSettings);
+    if (els.settingsBack) els.settingsBack.addEventListener("click", closeSettings);
+    if (els.settingsClose) els.settingsClose.addEventListener("click", closeSettings);
+    if (els.openFloating) els.openFloating.addEventListener("click", openFloatingPanel);
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && els.settingsPanel && !els.settingsPanel.hidden) {
+        closeSettings();
+      }
+    });
+  }
+
   function init() {
     Object.assign(els, {
       mode: $("snf-mode"),
@@ -584,8 +654,15 @@
       pauseRl: $("snf-pause-rl"),
       aggressive: $("snf-aggressive"),
       pacerMeta: $("snf-pacer-meta"),
+      // header action buttons (gear / floating) + settings overlay
+      openSettings: $("snf-open-settings"),
+      openFloating: $("snf-open-floating"),
+      settingsPanel: $("snf-settings-panel"),
+      settingsBack: $("snf-settings-back"),
+      settingsClose: $("snf-settings-close"),
     });
     bind();
+    bindHeaderActions();
     refresh();
     // Refresh pacer state every 3 s while popup is open
     setInterval(refreshPacerState, 3000);

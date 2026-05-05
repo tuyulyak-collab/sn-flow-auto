@@ -95,81 +95,119 @@
     });
   }
 
+  // Build the floating panel. Layout mirrors the popup (header + body),
+  // but compact and self-contained for in-page use:
+  //   - Header: brand + dynamic mode badge + minimize + close
+  //     - Close (X): hides the floating panel AND asks the SW to open the
+  //       chrome.action popup (per Tuyul's PR #14 spec). If openPopup is
+  //       not supported by this browser, we fall back to flashing the
+  //       toolbar badge so the user notices and clicks the icon manually.
+  //   - Status row: pill (RUNNING/PAUSED/COMPLETED/IDLE) + caption.
+  //   - 3 stat cards: Done / Fail / Current.
+  //   - Progress bar with percentage.
+  //   - 5 actions: Start / Stop / Resume / Retry / Skip current item.
+  //   - 1-line log tail (latest entry).
   function buildMonitor() {
     const head = makeEl("div", { class: "snflow-head" });
     const title = makeEl("div", { class: "snflow-title", text: "SN Flow Auto" });
-    const pill = makeEl("div", { class: "snflow-pill", text: "idle" });
+    bodyEls.modeBadge = makeEl("div", { class: "snflow-mode-badge", text: "—" });
     const minBtn = makeEl("button", { class: "snflow-iconbtn", title: "Minimize", text: "—" });
-    const closeBtn = makeEl("button", { class: "snflow-iconbtn", title: "Close", text: "×" });
+    const closeBtn = makeEl("button", { class: "snflow-iconbtn snflow-close-btn", title: "Close (return to extension popup)", text: "×" });
     minBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleMinimize(); });
-    closeBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleOpen(false); });
-    head.appendChild(title); head.appendChild(pill);
-    head.appendChild(minBtn); head.appendChild(closeBtn);
-    bodyEls.pill = pill;
+    closeBtn.addEventListener("click", (e) => { e.stopPropagation(); closeAndOpenPopup(); });
+    head.appendChild(title);
+    head.appendChild(bodyEls.modeBadge);
+    head.appendChild(minBtn);
+    head.appendChild(closeBtn);
 
     const body = makeEl("div", { class: "snflow-body" });
-    const rowStatus = makeEl("div", { class: "snflow-row" });
-    rowStatus.appendChild(makeEl("div", { class: "snflow-key", text: "Status" }));
-    bodyEls.status = makeEl("div", { class: "snflow-val", text: "idle" });
-    rowStatus.appendChild(bodyEls.status);
 
-    const rowProgress = makeEl("div", { class: "snflow-row" });
-    rowProgress.appendChild(makeEl("div", { class: "snflow-key", text: "Progress" }));
-    bodyEls.progress = makeEl("div", { class: "snflow-val", text: "0 / 0" });
-    rowProgress.appendChild(bodyEls.progress);
+    // Status row — large pill + caption ("All tasks complete" etc.)
+    const statusRow = makeEl("div", { class: "snflow-status-row" });
+    bodyEls.pill = makeEl("div", { class: "snflow-pill snflow-pill-lg", text: "IDLE" });
+    bodyEls.statusCaption = makeEl("div", { class: "snflow-status-caption", text: "No active run." });
+    statusRow.appendChild(bodyEls.pill);
+    statusRow.appendChild(bodyEls.statusCaption);
 
+    // Three stat cards: Done / Fail / Current
+    const statsRow = makeEl("div", { class: "snflow-stats" });
+    function makeStat(key, label, glyph, glyphClass) {
+      const card = makeEl("div", { class: "snflow-stat" });
+      const left = makeEl("span", { class: "snflow-stat-glyph " + glyphClass, text: glyph });
+      const right = makeEl("div", { class: "snflow-stat-rt" });
+      const lbl = makeEl("div", { class: "snflow-stat-label", text: label });
+      const val = makeEl("div", { class: "snflow-stat-value", text: "0" });
+      right.appendChild(lbl);
+      right.appendChild(val);
+      card.appendChild(left);
+      card.appendChild(right);
+      bodyEls[key] = val;
+      return card;
+    }
+    statsRow.appendChild(makeStat("statDone", "Done", "✓", "snflow-stat-done"));
+    statsRow.appendChild(makeStat("statFail", "Fail", "✕", "snflow-stat-fail"));
+    statsRow.appendChild(makeStat("statCurrent", "Current", "▶", "snflow-stat-current"));
+
+    // Progress bar with percentage
+    const progRow = makeEl("div", { class: "snflow-progress-row" });
     bodyEls.bar = makeEl("div", { class: "snflow-progress" });
     bodyEls.barFill = makeEl("span");
     bodyEls.bar.appendChild(bodyEls.barFill);
+    bodyEls.progressLabel = makeEl("div", { class: "snflow-progress-label", text: "0%" });
+    progRow.appendChild(bodyEls.bar);
+    progRow.appendChild(bodyEls.progressLabel);
 
-    const rowCurrent = makeEl("div", { class: "snflow-row" });
-    rowCurrent.appendChild(makeEl("div", { class: "snflow-key", text: "Current" }));
-    bodyEls.current = makeEl("div", { class: "snflow-val", text: "—" });
-    rowCurrent.appendChild(bodyEls.current);
+    body.appendChild(statusRow);
+    body.appendChild(statsRow);
+    body.appendChild(progRow);
 
-    bodyEls.prompt = makeEl("div", { class: "snflow-prompt", text: "—" });
-    bodyEls.log = makeEl("div", { class: "snflow-log", text: "Waiting…" });
-
-    body.appendChild(rowStatus);
-    body.appendChild(rowProgress);
-    body.appendChild(bodyEls.bar);
-    body.appendChild(rowCurrent);
-    body.appendChild(bodyEls.prompt);
-    body.appendChild(bodyEls.log);
-
+    // Footer — 5 action buttons (Start / Stop / Resume / Retry / Skip)
     const foot = makeEl("div", { class: "snflow-foot" });
-    bodyEls.btnPause = makeEl("button", { class: "snflow-btn", text: "Pause" });
-    bodyEls.btnResume = makeEl("button", { class: "snflow-btn snflow-primary", text: "Resume" });
-    bodyEls.btnStop = makeEl("button", { class: "snflow-btn", text: "Stop" });
-    bodyEls.btnPause.addEventListener("click", () => sendCmd("PAUSE"));
+    bodyEls.btnStart = makeEl("button", { class: "snflow-btn snflow-primary", text: "Start" });
+    bodyEls.btnStop = makeEl("button", { class: "snflow-btn snflow-stop", text: "Stop" });
+    bodyEls.btnResume = makeEl("button", { class: "snflow-btn", text: "Resume" });
+    bodyEls.btnRetry = makeEl("button", { class: "snflow-btn", text: "Retry" });
+    bodyEls.btnSkip = makeEl("button", { class: "snflow-btn", text: "Skip" });
+    bodyEls.btnStart.addEventListener("click", () => sendCmd("START"));
     bodyEls.btnResume.addEventListener("click", () => sendCmd("RESUME"));
-    bodyEls.btnStop.addEventListener("click", async () => {
-      // Stop halts and resets every queue item to Pending — confirm first.
-      // Pause/Resume preserves state, so users who want that should use Pause.
-      // We use an in-page <dialog> instead of window.confirm() because some
-      // Chromium configurations (e.g. --enable-automation) suppress the
-      // native confirm and silently return false, making Stop a no-op.
-      const ok = await snfConfirm(
-        "Stop will halt all processing immediately and reset every queue item back to Pending.\n\n" +
-        "Next Start will begin again from item 1.\n\n" +
-        "(Pause/Resume preserves state — use Pause if you want to keep position.)\n\n" +
-        "Continue?",
-        { title: "Stop & reset queue?", okText: "Stop & reset", cancelText: "Cancel" },
-      );
-      if (!ok) return;
-      sendCmd("STOP");
-    });
-    foot.appendChild(bodyEls.btnPause);
-    foot.appendChild(bodyEls.btnResume);
+    bodyEls.btnRetry.addEventListener("click", () => sendCmd("RETRY_FAILED"));
+    bodyEls.btnSkip.addEventListener("click", () => sendCmd("SKIP"));
+    // Stop on the floating panel = soft halt (PAUSE) per Tuyul's spec:
+    // user clicks Stop → Start disabled, only Resume continues. Queue and
+    // state are preserved; the SW pauses the run loop after the current
+    // item finishes (mid-flight items aren't aborted — use Skip for that).
+    bodyEls.btnStop.addEventListener("click", () => sendCmd("PAUSE"));
+    foot.appendChild(bodyEls.btnStart);
     foot.appendChild(bodyEls.btnStop);
+    foot.appendChild(bodyEls.btnResume);
+    foot.appendChild(bodyEls.btnRetry);
+    foot.appendChild(bodyEls.btnSkip);
+
+    // Single-line log tail (latest entry only — mirrors mockup)
+    bodyEls.log = makeEl("div", { class: "snflow-log snflow-log-line", text: "Waiting…" });
 
     const wrap = makeEl("div", { id: "snflow-monitor" });
     wrap.appendChild(head);
     wrap.appendChild(body);
     wrap.appendChild(foot);
+    wrap.appendChild(bodyEls.log);
 
     enableDrag(wrap, head);
     return wrap;
+  }
+
+  // Close X: hide the floating panel + ask the SW to open the chrome.action
+  // popup. The SW will use chrome.action.openPopup() (Chrome 127+); if that
+  // fails (older browser, no user-gesture window, or non-Chrome browser),
+  // it flashes the toolbar badge so the user notices and clicks the icon.
+  function closeAndOpenPopup() {
+    toggleOpen(false);
+    try {
+      chrome.runtime.sendMessage({ type: "SN_FLOW_OPEN_POPUP" }, () => {
+        const err = chrome.runtime && chrome.runtime.lastError;
+        if (err && root.SNFlowLogger) root.SNFlowLogger.warn("openPopup error", err.message);
+      });
+    } catch (_) {}
   }
 
   function enableDrag(panel, handle) {
@@ -203,6 +241,7 @@
     if (!ensureInjected()) return;
     STATE.open = (typeof force === "boolean") ? force : !STATE.open;
     monitorEl.classList.toggle("snflow-open", STATE.open);
+    if (STATE.open) refresh();
   }
 
   function toggleMinimize() {
@@ -226,55 +265,89 @@
     return s.length > n ? s.slice(0, n - 1) + "…" : s;
   }
 
+  // Compute the dynamic mode badge from the current item or first pending
+  // item: "Image ×4", "Video ×1", "Chain I→V", or "—" if queue is empty
+  // or fully done.
+  function computeModeBadge(queue, currentItem) {
+    const ref = currentItem || (queue || []).find((q) => q.status === "pending");
+    if (!ref) return "—";
+    if (ref.chainStep) return "Chain I→V";
+    const mode = (ref.mode || "image").toLowerCase();
+    const cnt = ref.outputCount && ref.outputCount > 1 ? ` ×${ref.outputCount}` : "";
+    if (mode === "video") return `Video${cnt}`;
+    if (mode === "chain") return "Chain I→V";
+    return `Image${cnt}`;
+  }
+
   function render({ runState, queue, currentItem, lastLog }) {
     if (!ensureInjected()) return;
-    const sum = (root.SNFlowQueue || {}).summarize ? root.SNFlowQueue.summarize(queue || []) : { total: (queue||[]).length, done: 0 };
+    const sum = (root.SNFlowQueue || {}).summarize
+      ? root.SNFlowQueue.summarize(queue || [])
+      : { total: (queue || []).length, done: 0, counts: {} };
     const total = sum.total || 0;
     const done = sum.done || 0;
+    const counts = sum.counts || {};
     const pct = total ? Math.round((done / total) * 100) : 0;
 
-    let status = "idle";
-    if (runState && runState.running) status = runState.paused ? "paused" : "running";
-
-    bodyEls.pill.textContent = status;
-    bodyEls.progress.textContent = `${done} / ${total}`;
-    bodyEls.barFill.style.width = pct + "%";
-    if (currentItem) {
-      bodyEls.status.textContent = status + ` · ${currentItem.status}`;
-      const ratio = currentItem.aspectRatio ? ` · ${currentItem.aspectRatio}` : "";
-      const cnt = currentItem.outputCount && currentItem.outputCount > 1 ? ` · x${currentItem.outputCount}` : "";
-      bodyEls.current.textContent = `${currentItem.mode || "?"}${ratio}${cnt} · #${(queue || []).indexOf(currentItem) + 1}`;
-      bodyEls.prompt.textContent = trim(currentItem.prompt, 240);
+    // Pill state: RUNNING / PAUSED / COMPLETED / IDLE
+    let pillText = "IDLE";
+    let pillClass = "snflow-pill-idle";
+    let caption = total === 0 ? "No prompts queued." : "Ready.";
+    if (runState && runState.running) {
+      if (runState.paused) { pillText = "PAUSED"; pillClass = "snflow-pill-paused"; caption = "Run paused."; }
+      else { pillText = "RUNNING"; pillClass = "snflow-pill-running"; caption = currentItem ? trim(currentItem.prompt, 80) : "Running queue…"; }
     } else if (total > 0 && done === total) {
-      // Run finished summary
-      const c = sum.counts || {};
-      const allOk = c.completed === total;
-      bodyEls.status.textContent = allOk ? "done" : `done · ${c.completed || 0} ok, ${c.failed || 0} failed`;
-      bodyEls.current.textContent = allOk ? "All items completed" : `${c.failed || 0} failed — use Retry`;
-      bodyEls.prompt.textContent = "—";
-    } else {
-      bodyEls.status.textContent = status;
-      bodyEls.current.textContent = "—";
-      bodyEls.prompt.textContent = total === 0 ? "No prompts queued" : "—";
+      const allOk = counts.completed === total;
+      pillText = allOk ? "COMPLETED" : "FINISHED";
+      pillClass = allOk ? "snflow-pill-done" : "snflow-pill-mixed";
+      caption = allOk
+        ? `All ${total} item${total === 1 ? "" : "s"} complete.`
+        : `${counts.completed || 0} ok, ${counts.failed || 0} failed, ${counts.skipped || 0} skipped.`;
     }
+    bodyEls.pill.textContent = pillText;
+    bodyEls.pill.className = "snflow-pill snflow-pill-lg " + pillClass;
+    bodyEls.statusCaption.textContent = caption;
+
+    // Mode badge in the header
+    bodyEls.modeBadge.textContent = computeModeBadge(queue, currentItem);
+
+    // Stat cards
+    bodyEls.statDone.textContent = String(counts.completed || 0);
+    bodyEls.statFail.textContent = String(counts.failed || 0);
+    const inFlight = (counts.sending || 0) + (counts.generating || 0)
+      + (counts.waiting || 0) + (counts.downloading || 0);
+    bodyEls.statCurrent.textContent = String(inFlight);
+
+    // Progress bar
+    bodyEls.barFill.style.width = pct + "%";
+    bodyEls.progressLabel.textContent = pct + "%";
+
+    // Action enable/disable.
+    // Per Tuyul's PR #14 spec: Stop = soft halt (PAUSE). After Stop, Start
+    // stays disabled; user must click Resume to continue. So Start is
+    // gated on (!running OR !paused-after-Stop = paused) — i.e. only when
+    // the queue is fully idle.
+    const running = !!(runState && runState.running);
+    const paused = !!(runState && runState.paused);
+    const fullyIdle = !running; // running:false means stopped/never-started
+    bodyEls.btnStart.disabled = !fullyIdle || total === 0 || done === total;
+    bodyEls.btnStop.disabled = !running || paused; // disable after Stop click
+    bodyEls.btnResume.disabled = !running || !paused;
+    bodyEls.btnRetry.disabled = !(counts.failed > 0);
+    bodyEls.btnSkip.disabled = !running || paused || !currentItem;
+
+    // Single-line log tail — mirrors mockup's `[18:37:53] Item #10: completed`
     if (lastLog) bodyEls.log.textContent = lastLog;
 
-    bodyEls.btnPause.disabled = !(runState && runState.running) || (runState && runState.paused);
-    bodyEls.btnResume.disabled = !(runState && runState.running) || !(runState && runState.paused);
-    bodyEls.btnStop.disabled = !(runState && runState.running);
-
-    // Pacer state — show "cooling down" / streak count if backend reports one
+    // Pacer state — if backend reports a streak, swap pill to a cooling tag
     try {
       chrome.runtime.sendMessage({ type: "SN_FLOW_PACING" }, (resp) => {
-        if (!resp || !resp.ok || !bodyEls.log) return;
+        if (!resp || !resp.ok || !bodyEls.pill) return;
         const st = resp.state || {};
-        if (st.errorStreak && st.errorStreak > 0) {
-          bodyEls.pill.textContent = `cooling × ${st.errorStreak}`;
-          bodyEls.pill.style.background = "#fde2e2";
-          bodyEls.pill.style.color = "#b6322f";
-        } else {
-          bodyEls.pill.style.background = "";
-          bodyEls.pill.style.color = "";
+        if (st.errorStreak && st.errorStreak > 0 && running) {
+          bodyEls.pill.textContent = `COOLING ×${st.errorStreak}`;
+          bodyEls.pill.className = "snflow-pill snflow-pill-lg snflow-pill-cooling";
+          bodyEls.statusCaption.textContent = "Slowing down after rate-limit signals…";
         }
       });
     } catch (_) {}

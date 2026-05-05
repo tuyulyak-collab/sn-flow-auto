@@ -223,25 +223,88 @@ async function runLoop() {
 
       const p = await getOrMakePacer();
       let succeeded = false;
+
+      // Helper: was this item skipped by the user since we set currentId?
+      // skipCurrent() writes runState.skipRequestedFor=id when the user
+      // hits Skip. We poll this so long awaits (waitForBatch's 5-min
+      // timeout) don't block the run loop.
+      const wasSkipped = async () => {
+        const r = await Storage.getRunState();
+        return r && r.skipRequestedFor === next.id;
+      };
+      const waitForSkip = (signal) => new Promise((resolve) => {
+        const tick = async () => {
+          if (signal && signal.aborted) return;
+          if (await wasSkipped()) { resolve({ skipped: true }); return; }
+          setTimeout(tick, 500);
+        };
+        tick();
+      });
+
       try {
-        const resp = await sendToTab(tab.id, {
+        const ac = { aborted: false };
+        const respPromise = sendToTab(tab.id, {
           type: "SN_FLOW_RUN_ITEM",
           payload: { item: next, settings },
-        }, (settings.waitTimeoutMs || 300_000) + 60_000);
+        }, (settings.waitTimeoutMs || 300_000) + 60_000)
+          .then((resp) => ({ resp }))
+          .catch((e) => ({ err: e }));
+        const skipPromise = waitForSkip(ac).then(() => ({ skipped: true }));
+        const winner = await Promise.race([respPromise, skipPromise]);
+        ac.aborted = true; // stop the skip poller
 
-        if (resp && resp.ok) {
-          await Storage.updateItem(next.id, {
-            status: "completed",
-            error: undefined,
-            filename: resp.filename,
-            mediaUrl: resp.mediaUrl,
-          });
-          p.onItemCompleted();
-          succeeded = true;
-          Log.log("item completed", { id: next.id, filename: resp.filename, pacer: p.getState() });
+        if (winner.skipped || (await wasSkipped())) {
+          // User skipped this item. The runItem promise may still be
+          // pending in the content script — best-effort, we already sent
+          // SN_FLOW_SKIP from skipCurrent() so it'll abort soon. The
+          // queue item is already marked 'skipped' by skipCurrent(); we
+          // just clear the flag and advance.
+          await Storage.setRunState({ skipRequestedFor: null });
+          Log.log("item skipped (user)", { id: next.id });
+          // Don't await respPromise — it'll resolve later but we ignore it
+        } else if (winner.err) {
+          throw winner.err;
         } else {
-          const errMsg = (resp && resp.error) || "unknown error";
-          // Treat heuristic rate-limit-y errors from content as a sniff signal too.
+          const resp = winner.resp;
+          if (resp && resp.ok) {
+            await Storage.updateItem(next.id, {
+              status: "completed",
+              error: undefined,
+              filename: resp.filename,
+              mediaUrl: resp.mediaUrl,
+            });
+            p.onItemCompleted();
+            succeeded = true;
+            Log.log("item completed", { id: next.id, filename: resp.filename, pacer: p.getState() });
+          } else {
+            const errMsg = (resp && resp.error) || "unknown error";
+            // user-skipped from the content script: do nothing — already marked
+            if (/user.?skipped/i.test(errMsg)) {
+              await Storage.setRunState({ skipRequestedFor: null });
+              Log.log("item skipped (content)", { id: next.id });
+            } else {
+              if (Pacing.isRateLimitMessage(errMsg)) {
+                p.onRateLimited(errMsg);
+                await maybePauseOnStreak(p);
+              }
+              const attempts = (next.attempts || 0) + 1;
+              if (attempts < (settings.maxAttempts || 3)) {
+                await Storage.updateItem(next.id, { status: "pending", error: errMsg });
+                Log.warn("item retrying", { id: next.id, attempts, errMsg });
+              } else {
+                await Storage.updateItem(next.id, { status: "failed", error: errMsg });
+                Log.error("item failed", { id: next.id, errMsg });
+              }
+            }
+          }
+        }
+      } catch (e) {
+        const errMsg = String((e && e.message) || e);
+        // If user skipped during the in-flight call, treat as skipped, not error
+        if (await wasSkipped()) {
+          await Storage.setRunState({ skipRequestedFor: null });
+          Log.log("item skipped (during error)", { id: next.id, errMsg });
+        } else {
           if (Pacing.isRateLimitMessage(errMsg)) {
             p.onRateLimited(errMsg);
             await maybePauseOnStreak(p);
@@ -249,25 +312,11 @@ async function runLoop() {
           const attempts = (next.attempts || 0) + 1;
           if (attempts < (settings.maxAttempts || 3)) {
             await Storage.updateItem(next.id, { status: "pending", error: errMsg });
-            Log.warn("item retrying", { id: next.id, attempts, errMsg });
           } else {
             await Storage.updateItem(next.id, { status: "failed", error: errMsg });
-            Log.error("item failed", { id: next.id, errMsg });
           }
+          Log.error("runLoop send error", errMsg);
         }
-      } catch (e) {
-        const errMsg = String((e && e.message) || e);
-        if (Pacing.isRateLimitMessage(errMsg)) {
-          p.onRateLimited(errMsg);
-          await maybePauseOnStreak(p);
-        }
-        const attempts = (next.attempts || 0) + 1;
-        if (attempts < (settings.maxAttempts || 3)) {
-          await Storage.updateItem(next.id, { status: "pending", error: errMsg });
-        } else {
-          await Storage.updateItem(next.id, { status: "failed", error: errMsg });
-        }
-        Log.error("runLoop send error", errMsg);
       }
 
       await Storage.setRunState({ currentId: null });
@@ -364,6 +413,29 @@ async function clearQueue() {
   return { ok: true };
 }
 
+// Skip the currently running item.
+//   1. Mark it as 'skipped' in the queue immediately (so UI updates).
+//   2. Set runState.skipRequestedFor = id so the run-loop knows to ignore
+//      whatever the in-flight runItem eventually resolves with (instead of
+//      overwriting 'skipped' with 'completed' or 'failed').
+//   3. Best-effort: send SN_FLOW_SKIP to the Flow tab so its in-flight
+//      `runItem` Promise rejects early with 'user-skipped'. If the content
+//      script isn't wired for it (older build) or the tab is closed, the
+//      skip still works — we just wait until runItem returns naturally and
+//      drop its result.
+async function skipCurrent() {
+  const run = await Storage.getRunState();
+  const id = run && run.currentId;
+  if (!id) return { ok: false, error: "no current item" };
+  await Storage.updateItem(id, { status: "skipped", error: "user skipped" });
+  await Storage.setRunState({ skipRequestedFor: id });
+  if (lastFlowTabId) {
+    try { chrome.tabs.sendMessage(lastFlowTabId, { type: "SN_FLOW_SKIP", payload: { id } }, () => void chrome.runtime.lastError); } catch (_) {}
+  }
+  Log.log("skip current", { id });
+  return { ok: true, id };
+}
+
 // ---------------- downloads ----------------
 async function downloadUrl(url, filename) {
   return new Promise((resolve) => {
@@ -409,6 +481,46 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return maybePauseOnStreak(p);
     }).catch(() => {});
     sendResponse({ ok: true });
+    return false;
+  }
+
+  if (msg.type === "SN_FLOW_OPEN_POPUP") {
+    // Floating panel → SW: programmatically open the chrome.action popup.
+    // chrome.action.openPopup() is Chrome 127+. Older browsers (or non-
+    // Chromium) don't have it; in that case we flash the toolbar badge
+    // ("OPEN") for a few seconds so the user notices and clicks the icon
+    // manually.
+    const flashBadge = () => {
+      try {
+        chrome.action.setBadgeBackgroundColor({ color: "#f05053" });
+        chrome.action.setBadgeText({ text: "OPEN" });
+        setTimeout(() => {
+          try { chrome.action.setBadgeText({ text: "" }); } catch (_) {}
+        }, 4000);
+      } catch (_) {}
+    };
+    if (chrome.action && typeof chrome.action.openPopup === "function") {
+      try {
+        const ret = chrome.action.openPopup();
+        if (ret && typeof ret.then === "function") {
+          ret.then(() => sendResponse({ ok: true, opened: true }))
+             .catch((e) => {
+               flashBadge();
+               sendResponse({ ok: false, error: String((e && e.message) || e), badgeFlashed: true });
+             });
+          return true;
+        }
+        // Some browsers return undefined synchronously
+        sendResponse({ ok: true, opened: true });
+        return false;
+      } catch (e) {
+        flashBadge();
+        sendResponse({ ok: false, error: String((e && e.message) || e), badgeFlashed: true });
+        return false;
+      }
+    }
+    flashBadge();
+    sendResponse({ ok: false, error: "openPopup not supported", badgeFlashed: true });
     return false;
   }
 
@@ -458,6 +570,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       case "STOP": p = stopQueue(); break;
       case "RETRY_FAILED": p = retryFailed(); break;
       case "CLEAR": p = clearQueue(); break;
+      case "SKIP": p = skipCurrent(); break;
       default: sendResponse({ ok: false, error: "unknown cmd" }); return false;
     }
     p.then((r) => sendResponse(r)).catch((e) => sendResponse({ ok: false, error: String(e && e.message || e) }));

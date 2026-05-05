@@ -51,6 +51,101 @@ html, body {
   letter-spacing: 0.6px;
 }
 
+/* Header action icons (gear / floating) — sit to the right of the status pill.
+ * Each is a stacked glyph + small label (matches the Tuyul mockup pattern). */
+.snf-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+}
+.snf-icon-action {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 44px;
+  padding: 4px 6px 3px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.72);
+  color: #4a1c1c;
+  font-family: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.06s ease, box-shadow 0.12s ease, background 0.12s ease;
+}
+.snf-icon-action:hover {
+  background: rgba(255, 255, 255, 0.92);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(74, 28, 28, 0.15);
+}
+.snf-icon-action:active { transform: translateY(0); }
+.snf-icon-glyph {
+  font-size: 16px;
+  line-height: 1;
+  color: #4a1c1c;
+}
+.snf-icon-label {
+  font-size: 9px;
+  text-transform: lowercase;
+  letter-spacing: 0.5px;
+  color: #6b4242;
+  font-weight: 700;
+}
+
+/* Settings panel — slide-in overlay anchored over the popup body. The
+ * popup body keeps rendering underneath (so chrome.storage subscriptions
+ * stay live), but the panel covers it and traps user focus until closed. */
+.snf-settings-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  max-width: 420px;
+  background: linear-gradient(180deg, #fffaf3 0%, #fff5ec 100%);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -8px 0 28px rgba(74, 28, 28, 0.18);
+  transform: translateX(100%);
+  transition: transform 0.18s ease-out;
+  overflow: hidden;
+}
+.snf-settings-panel:not([hidden]) { transform: translateX(0); }
+.snf-settings-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, #e1eec3 0%, #f05053 100%);
+  color: #2b1a1a;
+  border-bottom: 1px solid rgba(240, 80, 83, 0.22);
+}
+.snf-settings-head h2 {
+  margin: 0;
+  flex: 1;
+  font-size: 14px;
+  font-weight: 800;
+  color: #4a1c1c;
+  letter-spacing: 0.2px;
+}
+.snf-settings-head .snf-icon-action {
+  flex-direction: row;
+  min-width: 32px;
+  padding: 4px 8px;
+}
+.snf-settings-head .snf-icon-glyph { font-size: 16px; }
+.snf-settings-back .snf-icon-glyph { font-size: 18px; }
+.snf-settings-close .snf-icon-glyph { font-size: 18px; }
+.snf-settings-body {
+  flex: 1;
+  overflow: auto;
+  padding: 4px 0 12px 0;
+}
+
 .snf-card {
   background: #fffaf3;
   border-radius: 14px;

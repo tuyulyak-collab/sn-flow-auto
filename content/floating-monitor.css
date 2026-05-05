@@ -1,5 +1,14 @@
 /* content/floating-monitor.css — gradient SaaS styling for the in-page floating monitor.
  * Scoped to .snflow-* classes to avoid colliding with Google Flow CSS.
+ *
+ * PR #14 redesign:
+ *   - Mode badge in header (Image ×4 / Video ×1 / Chain I→V).
+ *   - Status row with large pill (RUNNING/PAUSED/COMPLETED/IDLE) + caption.
+ *   - 3 stat cards (Done / Fail / Current).
+ *   - Progress bar with percentage label.
+ *   - 5 actions in footer (Start / Stop / Resume / Retry / Skip).
+ *   - 1-line log tail (latest log entry).
+ *   - X button: closes panel and asks SW to re-open chrome.action popup.
  */
 
 #snflow-fab,
@@ -35,8 +44,8 @@
   position: fixed;
   right: 24px;
   bottom: 92px;
-  width: 320px;
-  max-height: 70vh;
+  width: 340px;
+  max-height: 80vh;
   background: #fffaf3;
   color: #2b1a1a;
   border-radius: 16px;
@@ -50,28 +59,37 @@
 #snflow-monitor.snflow-open { display: flex; }
 #snflow-monitor.snflow-min { max-height: 48px; }
 #snflow-monitor.snflow-min .snflow-body,
-#snflow-monitor.snflow-min .snflow-foot { display: none; }
+#snflow-monitor.snflow-min .snflow-foot,
+#snflow-monitor.snflow-min .snflow-log { display: none; }
 
+/* Header */
 .snflow-head {
   background: linear-gradient(135deg, #e1eec3 0%, #f05053 100%);
   color: #2b1a1a;
-  padding: 10px 14px;
+  padding: 10px 12px;
   display: flex;
   align-items: center;
   gap: 8px;
   cursor: move;
   font-weight: 700;
 }
-.snflow-head .snflow-title { flex: 1; font-size: 14px; letter-spacing: 0.2px; }
-.snflow-head .snflow-pill {
+.snflow-head .snflow-title {
+  flex: 1;
+  font-size: 13px;
+  letter-spacing: 0.3px;
+  font-weight: 800;
+  color: #2b1a1a;
+}
+.snflow-mode-badge {
   font-size: 10px;
-  padding: 2px 8px;
-  background: rgba(255, 255, 255, 0.55);
+  font-weight: 800;
+  padding: 3px 8px;
   border-radius: 999px;
+  background: rgba(255, 255, 255, 0.65);
   color: #4a1c1c;
-  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  white-space: nowrap;
 }
 .snflow-head .snflow-iconbtn {
   width: 26px; height: 26px;
@@ -81,58 +99,172 @@
   color: #4a1c1c;
   font-weight: 800;
   display: inline-flex; align-items: center; justify-content: center;
+  font-size: 13px;
 }
-.snflow-head .snflow-iconbtn:hover { background: rgba(255, 255, 255, 0.85); }
+.snflow-head .snflow-iconbtn:hover { background: rgba(255, 255, 255, 0.92); }
+.snflow-head .snflow-close-btn { background: rgba(255, 255, 255, 0.78); }
 
+/* Body */
 .snflow-body {
-  padding: 12px 14px;
+  padding: 12px 12px 8px;
   display: flex;
   flex-direction: column;
   gap: 10px;
   font-size: 13px;
-  overflow: auto;
 }
-.snflow-row {
-  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+
+/* Status row */
+.snflow-status-row {
+  display: flex; align-items: center; gap: 10px;
+  background: #fff7ec;
+  border-radius: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(240, 80, 83, 0.14);
 }
-.snflow-row .snflow-key { color: #6b4242; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
-.snflow-row .snflow-val { font-weight: 600; }
+.snflow-pill {
+  font-size: 10px;
+  padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.55);
+  border-radius: 999px;
+  color: #4a1c1c;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.snflow-pill-lg {
+  font-size: 11px;
+  padding: 5px 12px;
+  letter-spacing: 0.7px;
+}
+.snflow-pill-running { background: #ffe6c4; color: #7a3b00; }
+.snflow-pill-paused  { background: #fde2e2; color: #7a2a2a; }
+.snflow-pill-done    { background: #d8f3c2; color: #2c5a17; }
+.snflow-pill-mixed   { background: #ffe0b2; color: #7a3a00; }
+.snflow-pill-cooling { background: #fde2e2; color: #b6322f; }
+.snflow-pill-idle    { background: #fff; color: #6b4242; border: 1px solid rgba(74, 28, 28, 0.12); }
+.snflow-status-caption {
+  flex: 1;
+  font-size: 12px;
+  color: #4a2b2b;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+/* Stat cards */
+.snflow-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.snflow-stat {
+  background: #fff;
+  border: 1px solid rgba(240, 80, 83, 0.18);
+  border-radius: 12px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.snflow-stat-glyph {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+.snflow-stat-done    { background: #d8f3c2; color: #2c5a17; }
+.snflow-stat-fail    { background: #fde2e2; color: #b6322f; }
+.snflow-stat-current { background: #ffe6c4; color: #7a3b00; }
+.snflow-stat-rt { display: flex; flex-direction: column; line-height: 1.1; }
+.snflow-stat-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #6b4242;
+  font-weight: 700;
+}
+.snflow-stat-value {
+  font-size: 16px;
+  font-weight: 800;
+  color: #2b1a1a;
+}
+
+/* Progress */
+.snflow-progress-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 2px;
+}
 .snflow-progress {
-  width: 100%; height: 8px; background: #fbe7d6; border-radius: 999px; overflow: hidden;
+  flex: 1;
+  height: 8px; background: #fbe7d6; border-radius: 999px; overflow: hidden;
 }
 .snflow-progress > span {
   display: block; height: 100%;
   background: linear-gradient(135deg, #e1eec3 0%, #f05053 100%);
   width: 0%; transition: width 0.25s ease;
 }
-.snflow-prompt {
-  background: #fff4e8; border-radius: 10px; padding: 8px 10px;
-  font-size: 12px; color: #4a2b2b;
-  max-height: 60px; overflow: auto; white-space: pre-wrap; word-break: break-word;
-  border: 1px solid rgba(240, 80, 83, 0.16);
+.snflow-progress-label {
+  font-size: 11px;
+  font-weight: 800;
+  color: #4a1c1c;
+  min-width: 36px;
+  text-align: right;
 }
-.snflow-log {
-  background: #2b1a1a; color: #ffe7c2; border-radius: 10px;
-  padding: 8px 10px; font-size: 11px; line-height: 1.4;
-  max-height: 80px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
+
+/* Footer (5 action buttons) */
 .snflow-foot {
-  display: flex; gap: 6px; padding: 10px 12px 12px;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  padding: 10px 12px 10px;
   border-top: 1px solid rgba(240, 80, 83, 0.12);
   background: #fff7ec;
 }
 .snflow-btn {
-  flex: 1; padding: 8px 10px; border: none; border-radius: 10px; cursor: pointer;
-  font-size: 12px; font-weight: 700; letter-spacing: 0.2px;
-  background: #fff; color: #4a1c1c;
+  padding: 7px 4px;
   border: 1px solid rgba(240, 80, 83, 0.25);
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  background: #fff;
+  color: #4a1c1c;
+  text-transform: uppercase;
+  transition: transform 0.06s ease, box-shadow 0.12s ease;
 }
 .snflow-btn.snflow-primary {
   background: linear-gradient(135deg, #e1eec3 0%, #f05053 100%);
   color: #2b1a1a; border-color: transparent;
 }
-.snflow-btn:hover { transform: translateY(-1px); }
-.snflow-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+.snflow-btn.snflow-stop {
+  background: #fde2e2;
+  color: #7a2a2a;
+  border-color: rgba(182, 50, 47, 0.3);
+}
+.snflow-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(74, 28, 28, 0.12); }
+.snflow-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+
+/* Log line (single line, mockup-style) */
+.snflow-log {
+  background: #2b1a1a;
+  color: #ffe7c2;
+  font-size: 11px;
+  line-height: 1.4;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  padding: 8px 12px;
+  border-radius: 0;
+}
+.snflow-log-line {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-radius: 0;
+  border-top: 1px solid rgba(255, 231, 194, 0.12);
+}
 
 /* In-page confirm dialog (replaces window.confirm()) */
 #snflow-confirm,
@@ -167,18 +299,35 @@
   font-weight: 700;
   color: #2b1a1a;
 }
-.snflow-confirm-message {
+.snflow-confirm-msg {
   margin: 0;
   font-size: 13px;
-  line-height: 1.5;
   color: #4a2b2b;
+  line-height: 1.4;
   white-space: pre-wrap;
   word-break: break-word;
 }
-.snflow-confirm-actions {
+.snflow-confirm-foot {
   display: flex;
   gap: 8px;
-  padding: 12px 14px 14px;
+  padding: 12px 16px 16px;
+  justify-content: flex-end;
   background: #fffaf3;
 }
-.snflow-confirm-actions .snflow-btn { flex: 1; padding: 9px 12px; font-size: 13px; }
+.snflow-confirm-btn {
+  padding: 8px 14px;
+  border: 1px solid rgba(240, 80, 83, 0.25);
+  border-radius: 10px;
+  background: #fff;
+  color: #4a1c1c;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: inherit;
+}
+.snflow-confirm-btn:hover { transform: translateY(-1px); }
+.snflow-confirm-btn.snflow-confirm-primary {
+  background: linear-gradient(135deg, #e1eec3 0%, #f05053 100%);
+  color: #2b1a1a;
+  border-color: transparent;
+}
