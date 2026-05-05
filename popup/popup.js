@@ -24,6 +24,20 @@
 
   function renderQueue(queue) {
     els.queueBody.innerHTML = "";
+
+    // Empty state
+    if (!queue.length) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 5;
+      td.className = "snf-meta";
+      td.style.textAlign = "center";
+      td.style.padding = "18px 8px";
+      td.textContent = "No prompts in queue. Type prompts above or import a .txt file.";
+      tr.appendChild(td);
+      els.queueBody.appendChild(tr);
+    }
+
     // Pre-compute id -> queue position so chain video rows can show
     // "from #N" pointing at their parent image row.
     const idToPos = new Map();
@@ -121,6 +135,15 @@
     if (sum.counts.failed) parts.push(`${sum.counts.failed} failed`);
     if (sum.counts.skipped) parts.push(`${sum.counts.skipped} skipped`);
     els.progressStatus.textContent = parts.length ? parts.join(" · ") : "—";
+
+    // Run completion summary: show a clear message when all items are done
+    if (sum.total > 0 && sum.done === sum.total) {
+      const all = sum.counts.completed === sum.total;
+      const msg = all
+        ? `All ${sum.total} item${sum.total === 1 ? "" : "s"} completed.`
+        : `Run finished: ${sum.counts.completed} done, ${sum.counts.failed} failed, ${sum.counts.skipped} skipped.`;
+      els.progressStatus.textContent = msg;
+    }
   }
 
   function renderRunState(run) {
