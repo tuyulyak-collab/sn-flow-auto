@@ -107,7 +107,15 @@
       },
       { attempts: 3, baseDelay: 1000, onAttempt: (n) => n > 1 && Log.warn("prompt input retry", { attempt: n }) },
     );
+    Log.log("prompt input found", {
+      tag: promptEl.tagName,
+      slate: promptEl.getAttribute("data-slate-editor") === "true",
+      role: promptEl.getAttribute("role") || "",
+    });
     await PromptInput.setPromptText(promptEl, item.prompt);
+    Log.log("prompt fill verified", {
+      preview: (PromptInput.readPromptText(promptEl) || "").slice(0, 60),
+    });
     await Retry.sleep((settings && settings.promptInputDelayMs) || 250);
 
     // snapshot media URLs before generation
@@ -218,6 +226,10 @@
           let friendly = raw;
           if (/prompt input not found/i.test(raw)) {
             friendly = "Could not find prompt input — Flow UI may have changed or not fully loaded.";
+          } else if (/Flow rejected submit/i.test(raw)) {
+            friendly = "Flow rejected the prompt as empty — the editor's React state did not register the text. Try reloading the Flow tab.";
+          } else if (/prompt fill verification failed/i.test(raw)) {
+            friendly = "Could not write the prompt into Flow's editor — the input stayed empty after every insert strategy. Flow UI may have changed.";
           } else if (/generate button not found/i.test(raw)) {
             friendly = "Could not find the Generate button — Flow UI may have changed.";
           } else if (/timed out waiting for media/i.test(raw)) {
