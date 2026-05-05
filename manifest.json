@@ -1,0 +1,77 @@
+{
+  "manifest_version": 3,
+  "name": "SN Flow Auto",
+  "version": "0.1.0",
+  "description": "Batch prompt automation for Google Flow (image / video) with auto-download. Floating monitor + colorful gradient SaaS UI.",
+  "action": {
+    "default_title": "SN Flow Auto",
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "downloads",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://labs.google/*",
+    "https://*.labs.google/*",
+    "https://flow.google/*",
+    "https://*.flow.google/*",
+    "https://aitestkitchen.withgoogle.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://labs.google/*",
+        "https://*.labs.google/*",
+        "https://flow.google/*",
+        "https://*.flow.google/*",
+        "https://aitestkitchen.withgoogle.com/*"
+      ],
+      "js": [
+        "core/logger.js",
+        "core/retry.js",
+        "core/filename-template.js",
+        "content/flow-detector.js",
+        "content/prompt-input.js",
+        "content/generate-button.js",
+        "content/result-watcher.js",
+        "content/downloader.js",
+        "content/floating-monitor.js",
+        "content/content.js"
+      ],
+      "css": [
+        "content/floating-monitor.css"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/*"],
+      "matches": [
+        "https://labs.google/*",
+        "https://*.labs.google/*",
+        "https://flow.google/*",
+        "https://*.flow.google/*",
+        "https://aitestkitchen.withgoogle.com/*"
+      ]
+    }
+  ]
+}

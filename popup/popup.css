@@ -1,0 +1,216 @@
+/* popup/popup.css — colorful gradient SaaS UI per spec.
+ * Primary gradient: linear-gradient(135deg, #e1eec3 0%, #f05053 100%).
+ * Warm white / cream / coral / peach / lavender / mint accents. No dark/blue dominance.
+ */
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 420px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 13px;
+  color: #2b1a1a;
+  background: linear-gradient(180deg, #fffaf3 0%, #fff5ec 100%);
+}
+
+.snf-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, #e1eec3 0%, #f05053 100%);
+  color: #2b1a1a;
+}
+.snf-brand {
+  display: flex; align-items: center; gap: 10px; flex: 1;
+}
+.snf-logo {
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.65);
+  color: #4a1c1c;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; letter-spacing: 0.4px;
+  box-shadow: 0 2px 6px rgba(74, 28, 28, 0.18);
+}
+.snf-titles h1 {
+  margin: 0; font-size: 15px; font-weight: 800; letter-spacing: 0.2px;
+}
+.snf-titles p {
+  margin: 0; font-size: 11px; color: #4a2b2b; opacity: 0.85;
+}
+.snf-pill {
+  font-size: 10px;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.72);
+  border-radius: 999px;
+  color: #4a1c1c;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.snf-card {
+  background: #fffaf3;
+  border-radius: 14px;
+  margin: 10px 12px;
+  padding: 12px;
+  box-shadow: 0 2px 8px rgba(74, 28, 28, 0.06);
+  border: 1px solid rgba(240, 80, 83, 0.08);
+}
+.snf-card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 8px;
+}
+.snf-card-head h2 {
+  margin: 0; font-size: 13px; letter-spacing: 0.2px; color: #4a1c1c;
+}
+.snf-meta { font-size: 11px; color: #6b4242; }
+.snf-link {
+  background: none; border: none; cursor: pointer;
+  color: #f05053; font-weight: 700; font-size: 11px;
+}
+.snf-link:hover { text-decoration: underline; }
+
+.snf-row {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 8px; gap: 12px;
+}
+.snf-label {
+  font-size: 11px; color: #6b4242; text-transform: uppercase; letter-spacing: 0.5px;
+  font-weight: 700; display: block; margin-bottom: 4px;
+}
+.snf-select, .snf-textarea, .snf-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid rgba(240, 80, 83, 0.22);
+  border-radius: 10px;
+  font-size: 13px;
+  background: #fff7ec;
+  color: #2b1a1a;
+  font-family: inherit;
+}
+.snf-select { width: auto; min-width: 120px; }
+.snf-textarea { resize: vertical; min-height: 110px; line-height: 1.4; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.snf-textarea:focus, .snf-input:focus, .snf-select:focus {
+  outline: none;
+  border-color: #f05053;
+  box-shadow: 0 0 0 3px rgba(240, 80, 83, 0.15);
+}
+
+.snf-actions {
+  display: flex; align-items: center; gap: 8px; margin-top: 8px;
+}
+.snf-import { flex-wrap: wrap; }
+
+.snf-btn {
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(240, 80, 83, 0.25);
+  background: #fff;
+  color: #4a1c1c;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.06s ease, box-shadow 0.12s ease;
+}
+.snf-btn:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(240, 80, 83, 0.12); }
+.snf-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+
+.snf-primary {
+  background: linear-gradient(135deg, #e1eec3 0%, #f05053 100%);
+  color: #2b1a1a;
+  border-color: transparent;
+}
+.snf-secondary {
+  background: #fff4e8;
+  color: #4a1c1c;
+  border-color: rgba(240, 80, 83, 0.18);
+}
+.snf-danger {
+  background: #fff;
+  color: #b6322f;
+  border-color: rgba(182, 50, 47, 0.4);
+}
+
+.snf-progress-wrap { margin-bottom: 10px; }
+.snf-progress {
+  width: 100%; height: 8px; background: #fbe7d6; border-radius: 999px; overflow: hidden;
+}
+.snf-progress > span {
+  display: block; height: 100%; width: 0%;
+  background: linear-gradient(135deg, #e1eec3 0%, #f05053 100%);
+  transition: width 0.25s ease;
+}
+.snf-progress-meta {
+  display: flex; justify-content: space-between;
+  font-size: 11px; color: #6b4242; margin-top: 6px;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.snf-controls {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.snf-controls .snf-btn { width: 100%; }
+
+.snf-table-wrap { max-height: 220px; overflow: auto; border-radius: 10px; border: 1px solid rgba(240, 80, 83, 0.12); }
+.snf-table { width: 100%; border-collapse: collapse; font-size: 12px; background: #fff; }
+.snf-table th, .snf-table td {
+  text-align: left; padding: 6px 8px;
+  border-bottom: 1px solid rgba(240, 80, 83, 0.08);
+  vertical-align: top;
+}
+.snf-table th {
+  background: #fff4e8; color: #6b4242;
+  text-transform: uppercase; letter-spacing: 0.5px; font-size: 10px;
+  position: sticky; top: 0; z-index: 1;
+}
+.snf-table td.snf-prompt-cell {
+  max-width: 180px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.snf-status-tag {
+  display: inline-block; padding: 2px 8px; border-radius: 999px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase;
+  background: #fff4e8; color: #4a1c1c; border: 1px solid rgba(240, 80, 83, 0.22);
+}
+.snf-status-pending     { background: #fff4e8; color: #6b4242; }
+.snf-status-sending     { background: #ffe7c2; color: #8a4a00; }
+.snf-status-generating  { background: #ffd9d9; color: #b6322f; }
+.snf-status-waiting     { background: #ffe1c2; color: #8a4a00; }
+.snf-status-downloading { background: #e1eec3; color: #4a6b1a; }
+.snf-status-completed   { background: #d9f5d9; color: #2f7a2f; border-color: #b8ddb8; }
+.snf-status-failed      { background: #ffd0d0; color: #8a1a1a; border-color: #f0a0a0; }
+.snf-status-skipped     { background: #efe5ff; color: #5a3a8a; border-color: #cdb8ee; }
+
+.snf-row-actions { display: flex; gap: 4px; }
+.snf-icon-btn {
+  border: none; background: none; cursor: pointer;
+  font-size: 12px; padding: 2px 6px; border-radius: 6px;
+  color: #4a1c1c;
+}
+.snf-icon-btn:hover { background: #fff4e8; }
+
+.snf-log-card .snf-log {
+  max-height: 140px; overflow: auto;
+  background: #2b1a1a; color: #ffe7c2;
+  border-radius: 10px; padding: 8px 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  margin: 0;
+  white-space: pre-wrap; word-break: break-word;
+}
+
+.snf-footer {
+  display: flex; justify-content: space-between;
+  padding: 10px 16px 14px;
+  font-size: 11px; color: #6b4242;
+}
+.snf-footer code {
+  background: #fff4e8;
+  padding: 1px 6px;
+  border-radius: 6px;
+  color: #4a1c1c;
+}

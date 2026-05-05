@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SN Flow Auto</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header class="snf-header">
+    <div class="snf-brand">
+      <div class="snf-logo">SN</div>
+      <div class="snf-titles">
+        <h1>SN Flow Auto</h1>
+        <p>Batch prompt automation for Google Flow</p>
+      </div>
+    </div>
+    <div class="snf-pill" id="snf-status">idle</div>
+  </header>
+
+  <section class="snf-card">
+    <div class="snf-row">
+      <label class="snf-label" for="snf-mode">Mode</label>
+      <select id="snf-mode" class="snf-select">
+        <option value="image">Image</option>
+        <option value="video">Video</option>
+      </select>
+    </div>
+
+    <label class="snf-label" for="snf-prompts">Prompts (one per line)</label>
+    <textarea id="snf-prompts" class="snf-textarea" rows="6"
+      placeholder="A cinematic sunrise over Bali rice terraces&#10;A tiny astronaut planting flowers on the moon&#10;..."></textarea>
+
+    <div class="snf-actions snf-import">
+      <label class="snf-btn snf-secondary" for="snf-file">Import .txt</label>
+      <input id="snf-file" type="file" accept=".txt,text/plain" hidden />
+      <button id="snf-add" class="snf-btn snf-primary">Add to Queue</button>
+      <span id="snf-import-info" class="snf-meta"></span>
+    </div>
+  </section>
+
+  <section class="snf-card">
+    <div class="snf-progress-wrap">
+      <div class="snf-progress"><span id="snf-progress-fill"></span></div>
+      <div class="snf-progress-meta">
+        <span id="snf-progress-text">0 / 0</span>
+        <span id="snf-progress-status">—</span>
+      </div>
+    </div>
+
+    <div class="snf-controls">
+      <button id="snf-start" class="snf-btn snf-primary">Start</button>
+      <button id="snf-pause" class="snf-btn snf-secondary">Pause</button>
+      <button id="snf-resume" class="snf-btn snf-secondary">Resume</button>
+      <button id="snf-stop" class="snf-btn snf-secondary">Stop</button>
+      <button id="snf-retry" class="snf-btn snf-secondary">Retry Failed</button>
+      <button id="snf-clear" class="snf-btn snf-danger">Clear Queue</button>
+    </div>
+  </section>
+
+  <section class="snf-card">
+    <div class="snf-card-head">
+      <h2>Queue</h2>
+      <span id="snf-queue-count" class="snf-meta">0 items</span>
+    </div>
+    <div class="snf-table-wrap">
+      <table class="snf-table" id="snf-queue-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Prompt</th>
+            <th>Mode</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="snf-queue-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="snf-card snf-log-card">
+    <div class="snf-card-head">
+      <h2>Log</h2>
+      <button id="snf-log-clear" class="snf-link">clear</button>
+    </div>
+    <pre id="snf-log" class="snf-log"></pre>
+  </section>
+
+  <footer class="snf-footer">
+    <span>v0.1.0</span>
+    <span>Files saved to <code>SN_Flow_Auto/</code> in your Downloads folder</span>
+  </footer>
+
+  <script src="../core/logger.js"></script>
+  <script src="../core/retry.js"></script>
+  <script src="../core/filename-template.js"></script>
+  <script src="../core/storage.js"></script>
+  <script src="../core/queue-manager.js"></script>
+  <script src="../core/prompt-parser.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
