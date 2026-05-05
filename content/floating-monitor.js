@@ -181,6 +181,22 @@
     bodyEls.btnPause.disabled = !(runState && runState.running) || (runState && runState.paused);
     bodyEls.btnResume.disabled = !(runState && runState.running) || !(runState && runState.paused);
     bodyEls.btnStop.disabled = !(runState && runState.running);
+
+    // Pacer state — show "cooling down" / streak count if backend reports one
+    try {
+      chrome.runtime.sendMessage({ type: "SN_FLOW_PACING" }, (resp) => {
+        if (!resp || !resp.ok || !bodyEls.log) return;
+        const st = resp.state || {};
+        if (st.errorStreak && st.errorStreak > 0) {
+          bodyEls.pill.textContent = `cooling × ${st.errorStreak}`;
+          bodyEls.pill.style.background = "#fde2e2";
+          bodyEls.pill.style.color = "#b6322f";
+        } else {
+          bodyEls.pill.style.background = "";
+          bodyEls.pill.style.color = "";
+        }
+      });
+    } catch (_) {}
   }
 
   async function refresh() {

@@ -83,8 +83,26 @@ html, body {
   gap: 8px;
   margin-bottom: 10px;
 }
+.snf-grid2 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 8px;
+}
 .snf-col { display: flex; flex-direction: column; min-width: 0; }
 .snf-fullw { width: 100%; }
+.snf-pacing-card .snf-card-head { margin-bottom: 6px; }
+.snf-pacing-toggles { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.snf-check {
+  display: flex; align-items: flex-start; gap: 8px;
+  font-size: 12px; color: #2b1a1a;
+  padding: 6px 8px; border-radius: 8px;
+  background: rgba(225, 238, 195, 0.45);
+}
+.snf-check input { margin-top: 2px; accent-color: #f05053; }
+.snf-check.snf-warn { background: rgba(240, 80, 83, 0.12); }
+.snf-check.snf-warn strong { color: #d04547; }
+.snf-pacer-state { margin-top: 6px; font-size: 11px; }
 .snf-label {
   font-size: 11px; color: #6b4242; text-transform: uppercase; letter-spacing: 0.5px;
   font-weight: 700; display: block; margin-bottom: 4px;

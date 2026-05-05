@@ -60,6 +60,50 @@
     </div>
   </section>
 
+  <section class="snf-card snf-pacing-card">
+    <div class="snf-card-head">
+      <h2>Pacing &amp; anti-bot</h2>
+      <span class="snf-meta">Random delay + cooldown to avoid Flow's rate limit</span>
+    </div>
+    <div class="snf-grid2">
+      <div class="snf-col">
+        <label class="snf-label" for="snf-min-delay">Min delay (s)</label>
+        <input id="snf-min-delay" class="snf-input" type="number" min="0" step="1" value="30" />
+      </div>
+      <div class="snf-col">
+        <label class="snf-label" for="snf-max-delay">Max delay (s)</label>
+        <input id="snf-max-delay" class="snf-input" type="number" min="0" step="1" value="60" />
+      </div>
+    </div>
+    <div class="snf-grid2">
+      <div class="snf-col">
+        <label class="snf-label" for="snf-cooldown-every">Cooldown every N prompts</label>
+        <input id="snf-cooldown-every" class="snf-input" type="number" min="0" step="1" value="5" />
+      </div>
+      <div class="snf-col">
+        <label class="snf-label" for="snf-cooldown-ms">Cooldown duration (s)</label>
+        <input id="snf-cooldown-ms" class="snf-input" type="number" min="0" step="1" value="180" />
+      </div>
+    </div>
+    <div class="snf-pacing-toggles">
+      <label class="snf-check">
+        <input id="snf-adaptive" type="checkbox" checked />
+        <span>Adaptive backoff on rate-limit (×2 each block, capped 15 min)</span>
+      </label>
+      <label class="snf-check">
+        <input id="snf-pause-rl" type="checkbox" checked />
+        <span>Auto-pause queue after 3 consecutive rate-limit signals</span>
+      </label>
+      <label class="snf-check snf-warn">
+        <input id="snf-aggressive" type="checkbox" />
+        <span><strong>Aggressive mode</strong> — collapse all delays to 0 (risk: account block)</span>
+      </label>
+    </div>
+    <div class="snf-pacer-state">
+      <span id="snf-pacer-meta" class="snf-meta">—</span>
+    </div>
+  </section>
+
   <section class="snf-card">
     <div class="snf-progress-wrap">
       <div class="snf-progress"><span id="snf-progress-fill"></span></div>
@@ -119,6 +163,7 @@
   <script src="../core/storage.js"></script>
   <script src="../core/queue-manager.js"></script>
   <script src="../core/prompt-parser.js"></script>
+  <script src="../core/pacing.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
