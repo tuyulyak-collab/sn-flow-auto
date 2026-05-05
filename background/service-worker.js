@@ -180,7 +180,7 @@ async function runLoop() {
       let next = Queue.nextPending(queue, { chainRunOrder: settings.chainRunOrder });
       if (!next) {
         Log.log("queue done");
-        await Storage.setRunState({ running: false, paused: false, currentId: null });
+        await Storage.setRunState({ running: false, paused: false, currentId: null, skipRequestedFor: null });
         break;
       }
 
@@ -208,7 +208,7 @@ async function runLoop() {
         Log.error("no Flow tab open");
         await Storage.updateItem(next.id, { status: "failed", error: "Open https://labs.google/flow first" });
         // soft-stop: keep the queue intact but stop the loop
-        await Storage.setRunState({ running: false, paused: false, currentId: null });
+        await Storage.setRunState({ running: false, paused: false, currentId: null, skipRequestedFor: null });
         break;
       }
       lastFlowTabId = tab.id;
@@ -217,7 +217,7 @@ async function runLoop() {
       if (!ready) {
         Log.error("content script unavailable in Flow tab", { tabId: tab.id });
         await Storage.updateItem(next.id, { status: "failed", error: "Content script unavailable" });
-        await Storage.setRunState({ running: false, paused: false, currentId: null });
+        await Storage.setRunState({ running: false, paused: false, currentId: null, skipRequestedFor: null });
         break;
       }
 
@@ -361,7 +361,10 @@ async function startQueue() {
     Log.warn("startQueue called with no pending items");
     return { ok: false, error: "no pending items" };
   }
-  await Storage.setRunState({ running: true, paused: false });
+  // Always clear any stale skip flag from a previous Skip→Stop race
+  // (otherwise the run loop could silently auto-skip the first matching
+  // re-queued item).
+  await Storage.setRunState({ running: true, paused: false, skipRequestedFor: null });
   runLoop();
   return { ok: true };
 }
@@ -395,7 +398,9 @@ async function stopQueue() {
     updatedAt: Date.now(),
   }));
   await Storage.setQueue(reset);
-  await Storage.setRunState({ running: false, paused: false, currentId: null });
+  // Clear skip flag too: stopQueue resets all items to pending with the same
+  // ids, so any leftover skipRequestedFor would silently auto-skip on Start.
+  await Storage.setRunState({ running: false, paused: false, currentId: null, skipRequestedFor: null });
   if (pacer) pacer.reset();
   Log.log("queue stopped + fully reset", { count: reset.length });
   return { ok: true, resetCount: reset.length };
@@ -409,7 +414,7 @@ async function retryFailed() {
 
 async function clearQueue() {
   await Storage.setQueue([]);
-  await Storage.setRunState({ running: false, paused: false, currentId: null });
+  await Storage.setRunState({ running: false, paused: false, currentId: null, skipRequestedFor: null });
   return { ok: true };
 }
 

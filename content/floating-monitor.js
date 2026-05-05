@@ -51,12 +51,12 @@
     const d = makeEl("dialog", { id: "snflow-confirm" });
     const body = makeEl("div", { class: "snflow-confirm-body" });
     const title = makeEl("h3", { class: "snflow-confirm-title", text: "Confirm" });
-    const msg = makeEl("p", { class: "snflow-confirm-message", text: "" });
+    const msg = makeEl("p", { class: "snflow-confirm-msg", text: "" });
     body.appendChild(title);
     body.appendChild(msg);
-    const actions = makeEl("div", { class: "snflow-confirm-actions" });
-    const cancel = makeEl("button", { type: "button", class: "snflow-btn", text: "Cancel" });
-    const ok = makeEl("button", { type: "button", class: "snflow-btn snflow-primary", text: "OK" });
+    const actions = makeEl("div", { class: "snflow-confirm-foot" });
+    const cancel = makeEl("button", { type: "button", class: "snflow-confirm-btn", text: "Cancel" });
+    const ok = makeEl("button", { type: "button", class: "snflow-confirm-btn snflow-confirm-primary", text: "OK" });
     actions.appendChild(cancel);
     actions.appendChild(ok);
     d.appendChild(body);
