@@ -48,13 +48,20 @@
       promptLen: item.prompt.length,
     });
 
-    // 0) apply Flow's native settings via the radix dropdown (best-effort)
+    // 0) apply Flow's native settings via the radix dropdown (best-effort).
+    //   For chain video steps we additionally pick the configured Veo model
+    //   (via settings.chainVideoModel) so Flow generates with image-to-video
+    //   rather than the previously selected image model.
+    const itemModel = (item.chainStep === "video" && settings && settings.chainVideoModel)
+      ? settings.chainVideoModel
+      : null;
     if (Settings && Settings.applySettings) {
       try {
         const applied = await Settings.applySettings({
           mode: itemMode,
           aspectRatio: itemRatio,
           outputCount: itemCount,
+          model: itemModel,
         });
         Log.log("settings applied", applied);
       } catch (e) {
@@ -105,8 +112,14 @@
     await reportStatus(item.id, "generating");
 
     // 3) wait for new media. For outputCount > 1 we wait for the batch.
+    //    Chain video steps run on Veo which is ~2-3x slower than image gen,
+    //    so honor settings.chainVideoTimeoutMs when this is a chain video.
     await reportStatus(item.id, "waiting");
-    const waitOpts = { timeout: (settings && settings.waitTimeoutMs) || 5 * 60 * 1000 };
+    const baseTimeout = (settings && settings.waitTimeoutMs) || 5 * 60 * 1000;
+    const chainVideoTimeout = (settings && settings.chainVideoTimeoutMs) || 8 * 60 * 1000;
+    const waitOpts = {
+      timeout: (item.chainStep === "video") ? chainVideoTimeout : baseTimeout,
+    };
     let result;
     if (itemCount > 1) {
       result = await ResultWatcher.waitForBatch(before, itemMode, itemCount, waitOpts);

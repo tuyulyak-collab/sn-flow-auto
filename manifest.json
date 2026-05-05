@@ -54,6 +54,7 @@
         "content/flow-settings.js",
         "content/prompt-input.js",
         "content/generate-button.js",
+        "content/flow-add-media.js",
         "content/result-watcher.js",
         "content/downloader.js",
         "content/dom-error-watcher.js",
