@@ -159,6 +159,76 @@
     </header>
 
     <div class="snf-settings-body">
+      <!--
+        Download Settings (PR #15). Lives inside the Settings overlay so the
+        main popup stays uncluttered. Storage keys: filenameTemplate,
+        outputFolder, conflictAction. Sanitization + token expansion is in
+        core/download-path.js.
+      -->
+      <section class="snf-card snf-download-card">
+        <div class="snf-card-head">
+          <h2>Download Settings</h2>
+          <span class="snf-meta">Choose how SN Flow Auto names and organizes downloaded files.</span>
+        </div>
+
+        <div class="snf-col">
+          <label class="snf-label" for="snf-filename-template">File Name Format</label>
+          <input id="snf-filename-template" class="snf-input snf-fullw" type="text"
+            placeholder="SN_flow_{random5}_{ddmmyyyy}" autocomplete="off" spellcheck="false" />
+          <p class="snf-meta snf-helper">Choose the default name pattern for downloaded files.</p>
+          <div class="snf-token-helper">
+            <p class="snf-token-helper-title">Available shortcuts:</p>
+            <ul class="snf-token-list">
+              <li><code>{random5}</code> = random 5 letters/numbers</li>
+              <li><code>{ddmmyyyy}</code> = today’s date</li>
+              <li><code>{mode}</code> = image, video, or chain</li>
+              <li><code>{index}</code> = queue number</li>
+              <li><code>{promptSlug}</code> = short prompt text</li>
+            </ul>
+          </div>
+          <p id="snf-filename-error" class="snf-meta snf-error" hidden></p>
+          <p id="snf-filename-preview" class="snf-meta snf-preview"></p>
+        </div>
+
+        <div class="snf-col snf-folder-row">
+          <label class="snf-label" for="snf-output-folder">Save Inside Downloads Folder</label>
+          <input id="snf-output-folder" class="snf-input snf-fullw" type="text"
+            placeholder="SN Flow Auto" autocomplete="off" spellcheck="false" />
+          <p class="snf-meta snf-helper">Files will be saved inside your Chrome Downloads folder.</p>
+          <div class="snf-token-helper">
+            <p class="snf-token-helper-title">Examples:</p>
+            <ul class="snf-token-list">
+              <li><code>SN Flow Auto</code></li>
+              <li><code>SN Flow Auto/Images</code></li>
+              <li><code>SN Flow Auto/Videos</code></li>
+              <li><code>SN Flow Auto/{ddmmyyyy}</code></li>
+            </ul>
+          </div>
+          <p class="snf-folder-warn">
+            For Chrome security reasons, extensions can only save automatically inside Downloads or subfolders inside Downloads.
+          </p>
+          <p id="snf-folder-error" class="snf-meta snf-error" hidden></p>
+        </div>
+
+        <div class="snf-col snf-conflict-row">
+          <label class="snf-check">
+            <input id="snf-conflict-keep" type="checkbox" checked />
+            <span>Keep both files if name already exists</span>
+          </label>
+          <p class="snf-meta snf-helper" style="margin: 4px 0 0 28px;">Recommended. This prevents old files from being overwritten.</p>
+        </div>
+
+        <div class="snf-actions snf-download-actions">
+          <button type="button" id="snf-open-last-download" class="snf-btn snf-secondary">Open Last Download</button>
+          <button type="button" id="snf-open-downloads-folder" class="snf-btn snf-secondary">Open Downloads Folder</button>
+        </div>
+        <p class="snf-meta snf-download-actions-helper">
+          <strong>Open Last Download:</strong> open the location of the most recently downloaded file.
+          <br />
+          <strong>Open Downloads Folder:</strong> open your default Chrome Downloads folder.
+        </p>
+      </section>
+
       <section class="snf-card snf-pacing-card">
         <div class="snf-card-head">
           <h2>Safe Speed &amp; Delays</h2>
@@ -256,7 +326,7 @@
 
   <footer class="snf-footer">
     <span>v0.1.0</span>
-    <span>Files saved to <code>SN_Flow_Auto/</code> in your Downloads folder</span>
+    <span>Downloaded files will be saved inside your Downloads folder.</span>
   </footer>
 
   <!--
@@ -280,6 +350,7 @@
   <script src="../core/logger.js"></script>
   <script src="../core/retry.js"></script>
   <script src="../core/filename-template.js"></script>
+  <script src="../core/download-path.js"></script>
   <script src="../core/storage.js"></script>
   <script src="../core/queue-manager.js"></script>
   <script src="../core/prompt-parser.js"></script>

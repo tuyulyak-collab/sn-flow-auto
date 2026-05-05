@@ -4,7 +4,12 @@
  * Subscribes to chrome.storage.onChanged for live updates while popup is open.
  */
 (function () {
-  const { SNFlowStorage: Storage, SNFlowQueue: Queue, SNFlowPromptParser: Parser } = self;
+  const {
+    SNFlowStorage: Storage,
+    SNFlowQueue: Queue,
+    SNFlowPromptParser: Parser,
+    SNFlowDownloadPath: DownloadPath,
+  } = self;
 
   const els = {};
   function $(id) { return document.getElementById(id); }
@@ -180,8 +185,60 @@
     }
     syncChainInputs(settings);
     syncPacingInputs(settings);
+    syncDownloadInputs(settings);
     renderLogs(all[Storage.KEYS.LOGS] || []);
     refreshPacerState();
+  }
+
+  // Download Settings (PR #15) — sync inputs and live-validate.
+  function syncDownloadInputs(settings) {
+    if (els.filenameTemplate && document.activeElement !== els.filenameTemplate) {
+      const v = settings.filenameTemplate || "SN_flow_{random5}_{ddmmyyyy}";
+      if (els.filenameTemplate.value !== v) els.filenameTemplate.value = v;
+    }
+    if (els.outputFolder && document.activeElement !== els.outputFolder) {
+      const v = typeof settings.outputFolder === "string" ? settings.outputFolder : "SN Flow Auto";
+      if (els.outputFolder.value !== v) els.outputFolder.value = v;
+    }
+    if (els.conflictKeep) {
+      // Default = keep both files (uniquify). Anything that isn't
+      // "overwrite" is treated as keep-both for forward-compat.
+      const keep = settings.conflictAction !== "overwrite";
+      if (els.conflictKeep.checked !== keep) els.conflictKeep.checked = keep;
+    }
+    refreshFilenamePreview();
+  }
+
+  function refreshFilenamePreview() {
+    if (!els.filenamePreview || !DownloadPath) return;
+    const tplRaw = (els.filenameTemplate && els.filenameTemplate.value) || "";
+    const folderRaw = (els.outputFolder && els.outputFolder.value) || "";
+    const tplCheck = DownloadPath.validateFilenameTemplate(tplRaw);
+    const folderCheck = DownloadPath.validateOutputFolder(folderRaw);
+    if (!tplCheck.ok || !folderCheck.ok) {
+      els.filenamePreview.textContent = "";
+      return;
+    }
+    const sample = DownloadPath.buildDownloadPath({
+      outputFolder: folderRaw,
+      filenameTemplate: tplRaw,
+      ext: "png",
+      ctx: { mode: "image", index: 1, prompt: "A cinematic sunrise over Bali" },
+    });
+    els.filenamePreview.textContent = `Preview: Downloads/${sample}`;
+  }
+
+  function setFieldError(inputEl, errorEl, msg) {
+    if (!inputEl || !errorEl) return;
+    if (msg) {
+      errorEl.textContent = msg;
+      errorEl.hidden = false;
+      inputEl.classList.add("snf-input-error");
+    } else {
+      errorEl.textContent = "";
+      errorEl.hidden = true;
+      inputEl.classList.remove("snf-input-error");
+    }
   }
 
   function syncChainInputs(settings) {
@@ -533,12 +590,83 @@
       });
     }
 
+    // ---- Download Settings (PR #15) ----
+    bindDownloadSettings();
+
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local") return;
       if (changes[Storage.KEYS.QUEUE] || changes[Storage.KEYS.RUN] || changes[Storage.KEYS.LOGS] || changes[Storage.KEYS.SETTINGS]) {
         refresh();
       }
     });
+  }
+
+  function bindDownloadSettings() {
+    if (!DownloadPath) return;
+
+    const validateAndSaveFilename = async () => {
+      if (!els.filenameTemplate) return;
+      const raw = els.filenameTemplate.value;
+      const result = DownloadPath.validateFilenameTemplate(raw);
+      if (!result.ok) {
+        setFieldError(els.filenameTemplate, els.filenameError, result.error);
+        return;
+      }
+      setFieldError(els.filenameTemplate, els.filenameError, null);
+      await Storage.setSettings({ filenameTemplate: result.value });
+      refreshFilenamePreview();
+    };
+
+    const validateAndSaveFolder = async () => {
+      if (!els.outputFolder) return;
+      const raw = els.outputFolder.value;
+      const result = DownloadPath.validateOutputFolder(raw);
+      if (!result.ok) {
+        setFieldError(els.outputFolder, els.folderError, result.error);
+        return;
+      }
+      setFieldError(els.outputFolder, els.folderError, null);
+      await Storage.setSettings({ outputFolder: result.value });
+      refreshFilenamePreview();
+    };
+
+    if (els.filenameTemplate) {
+      els.filenameTemplate.addEventListener("input", refreshFilenamePreview);
+      els.filenameTemplate.addEventListener("change", validateAndSaveFilename);
+      els.filenameTemplate.addEventListener("blur", validateAndSaveFilename);
+    }
+    if (els.outputFolder) {
+      els.outputFolder.addEventListener("input", refreshFilenamePreview);
+      els.outputFolder.addEventListener("change", validateAndSaveFolder);
+      els.outputFolder.addEventListener("blur", validateAndSaveFolder);
+    }
+    if (els.conflictKeep) {
+      els.conflictKeep.addEventListener("change", async () => {
+        await Storage.setSettings({
+          conflictAction: els.conflictKeep.checked ? "uniquify" : "overwrite",
+        });
+      });
+    }
+    if (els.openLastDownload) {
+      els.openLastDownload.addEventListener("click", () => {
+        try {
+          chrome.runtime.sendMessage({ type: "SN_FLOW_OPEN_LAST_DOWNLOAD" }, () => {
+            // ignore lastError; the SW falls back to opening the default
+            // Downloads folder when no lastDownloadId is recorded yet.
+            void chrome.runtime.lastError;
+          });
+        } catch (_) { /* noop */ }
+      });
+    }
+    if (els.openDownloadsFolder) {
+      els.openDownloadsFolder.addEventListener("click", () => {
+        try {
+          chrome.runtime.sendMessage({ type: "SN_FLOW_OPEN_DOWNLOADS_FOLDER" }, () => {
+            void chrome.runtime.lastError;
+          });
+        } catch (_) { /* noop */ }
+      });
+    }
   }
 
   // ---- header actions (gear / floating) ----
@@ -660,6 +788,15 @@
       settingsPanel: $("snf-settings-panel"),
       settingsBack: $("snf-settings-back"),
       settingsClose: $("snf-settings-close"),
+      // download settings (PR #15)
+      filenameTemplate: $("snf-filename-template"),
+      filenameError: $("snf-filename-error"),
+      filenamePreview: $("snf-filename-preview"),
+      outputFolder: $("snf-output-folder"),
+      folderError: $("snf-folder-error"),
+      conflictKeep: $("snf-conflict-keep"),
+      openLastDownload: $("snf-open-last-download"),
+      openDownloadsFolder: $("snf-open-downloads-folder"),
     });
     bind();
     bindHeaderActions();

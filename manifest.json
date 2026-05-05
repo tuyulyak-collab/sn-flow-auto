@@ -49,6 +49,7 @@
         "core/logger.js",
         "core/retry.js",
         "core/filename-template.js",
+        "core/download-path.js",
         "core/pacing.js",
         "content/flow-detector.js",
         "content/flow-settings.js",

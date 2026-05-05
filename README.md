@@ -70,8 +70,9 @@ e.g. SN_flow_A7K2Q_05052026.mp4
 6. Klik **Start**.
 7. Tonton progress di popup atau di **floating monitor** di halaman Flow
    (klik tombol bulat `SN` di pojok kanan bawah).
-8. Hasil otomatis tersimpan ke folder `Downloads/SN_Flow_Auto/` dengan nama
-   `SN_flow_{random5}_{ddmmyyyy}.{ext}`.
+8. Hasil otomatis tersimpan ke folder `Downloads/SN Flow Auto/` (default —
+   bisa diubah di **Settings → Download Settings**) dengan nama
+   `SN_flow_{random5}_{ddmmyyyy}.{ext}` (juga bisa diubah).
 
 ### Manual Prompts
 
@@ -127,6 +128,7 @@ background/
   service-worker.js                  — orchestrator + chrome.downloads
 core/                                — shared between popup, SW, content scripts
   logger.js retry.js filename-template.js
+  download-path.js                   — Download Settings sanitization + tokens
   storage.js queue-manager.js prompt-parser.js
 icons/                               — generated app icons (16/48/128)
 tools/generate_icons.py              — pure-stdlib icon generator
@@ -221,7 +223,7 @@ monitor read it via `chrome.storage.onChanged`.
 | "Open https://labs.google/flow first" | Open a Flow tab and make sure you're logged in. |
 | Prompt input not found | Refresh the Flow tab. Make sure you're on a project page (not the landing page). |
 | Generate button not found | Check if Flow's UI changed. Try refreshing. |
-| Download folder empty | Check `Downloads/SN_Flow_Auto/`. Chrome may block downloads — check `chrome://downloads`. |
+| Download folder empty | Check the folder set in **Settings → Download Settings** (default `Downloads/SN Flow Auto/`). Chrome may block downloads — check `chrome://downloads`. |
 | Queue stuck on Running | Close popup, reopen. If stuck, go to `chrome://extensions` → reload the extension. |
 | Rate limit / blocked | Increase min/max delay in Pacing settings. Enable "Pause on rate limit". |
 | Chain video has no input image | Make sure the parent image completed successfully. Check that `flow-add-media.js` is loaded (visible in content scripts). |

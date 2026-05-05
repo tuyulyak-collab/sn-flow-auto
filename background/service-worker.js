@@ -12,6 +12,7 @@ self.importScripts(
   "../core/logger.js",
   "../core/retry.js",
   "../core/filename-template.js",
+  "../core/download-path.js",
   "../core/storage.js",
   "../core/queue-manager.js",
   "../core/prompt-parser.js",
@@ -24,6 +25,7 @@ const Retry = self.SNFlowRetry;
 const Storage = self.SNFlowStorage;
 const Queue = self.SNFlowQueue;
 const Filename = self.SNFlowFilename;
+const DownloadPath = self.SNFlowDownloadPath;
 const Pacing = self.SNFlowPacing;
 const Sniffer = self.SNFlowSniffer;
 
@@ -120,6 +122,7 @@ async function ensureContentInjected(tabId) {
         "core/logger.js",
         "core/retry.js",
         "core/filename-template.js",
+        "core/download-path.js",
         "core/pacing.js",
         "content/flow-detector.js",
         "content/flow-settings.js",
@@ -183,6 +186,14 @@ async function runLoop() {
         await Storage.setRunState({ running: false, paused: false, currentId: null, skipRequestedFor: null });
         break;
       }
+
+      // Stamp the queue position (1-based) onto the dispatched item so the
+      // content script can substitute it into the {index} filename token.
+      // We compute it here (against the current queue snapshot) rather
+      // than in content/content.js because the SW is the only place that
+      // sees the canonical queue ordering.
+      const queueIndex = queue.findIndex((q) => q.id === next.id) + 1;
+      next = { ...next, queueIndex };
 
       // Chain video step: copy the parent image's mediaUrl onto the
       // outgoing item as inputMediaUrl so the content script can attach
@@ -464,18 +475,43 @@ async function skipCurrent() {
 }
 
 // ---------------- downloads ----------------
-async function downloadUrl(url, filename) {
+// `filename` from the content script is just the body+ext (e.g.
+// "SN_flow_A7K2Q_05052026.png"). The SW prepends the user's configured
+// `outputFolder` (relative to Downloads/) and applies the user's chosen
+// `conflictAction`. This way the popup is the single source of truth for
+// folder + conflict policy, and the content script only worries about the
+// file body. See core/download-path.js for sanitization rules.
+async function downloadUrl(url, filename, opts) {
+  const settings = await Storage.getSettings();
+  const folder = DownloadPath.sanitizeOutputFolder(settings.outputFolder);
+  // Expand tokens that may appear in folder segments (e.g. {ddmmyyyy}).
+  // The filename body has already been expanded by the content script —
+  // we don't re-expand it here.
+  const ctx = (opts && opts.ctx) || {};
+  const expandedFolder = folder
+    ? folder.split("/").map((seg) => DownloadPath.expandTemplate(seg, ctx)).join("/")
+    : "";
+  const safeBody = DownloadPath.sanitizeFilenameBody(
+    String(filename || "").replace(/^\/+/, "").split("/").pop() || "untitled",
+  );
+  const path = expandedFolder ? `${expandedFolder}/${safeBody}` : safeBody;
+  const conflictAction = settings.conflictAction === "overwrite" ? "overwrite" : "uniquify";
   return new Promise((resolve) => {
     try {
       chrome.downloads.download({
         url,
-        filename: `SN_Flow_Auto/${filename}`,
+        filename: path,
         saveAs: false,
-        conflictAction: "uniquify",
+        conflictAction,
       }, (id) => {
         const err = chrome.runtime && chrome.runtime.lastError;
-        if (err || !id) resolve({ ok: false, error: (err && err.message) || "download failed" });
-        else resolve({ ok: true, id });
+        if (err || !id) resolve({ ok: false, error: (err && err.message) || "download failed", path });
+        else {
+          // Track the most recent download id so the popup's "Open Last
+          // Download" button can call chrome.downloads.show(id). Best-effort.
+          Storage.setSettings({ lastDownloadId: id }).catch(() => {});
+          resolve({ ok: true, id, path });
+        }
       });
     } catch (e) { resolve({ ok: false, error: String(e && e.message || e) }); }
   });
@@ -486,10 +522,51 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || typeof msg !== "object") return;
 
   if (msg.type === "SN_FLOW_DOWNLOAD") {
-    const { url, filename } = msg.payload || {};
+    const { url, filename, ctx } = msg.payload || {};
     if (!url || !filename) { sendResponse({ ok: false, error: "missing url/filename" }); return false; }
-    downloadUrl(url, filename).then((r) => sendResponse(r));
+    downloadUrl(url, filename, { ctx }).then((r) => sendResponse(r));
     return true;
+  }
+
+  if (msg.type === "SN_FLOW_OPEN_LAST_DOWNLOAD") {
+    // Open the location of the most recently downloaded file. Falls back
+    // to opening the default Downloads folder if no id is recorded yet,
+    // or if the id has been erased by the user.
+    Storage.getSettings().then((settings) => {
+      const id = settings && settings.lastDownloadId;
+      if (id != null && chrome.downloads && typeof chrome.downloads.show === "function") {
+        try {
+          chrome.downloads.show(id);
+          sendResponse({ ok: true, id });
+          return;
+        } catch (e) {
+          // fall through to default folder
+        }
+      }
+      try {
+        if (chrome.downloads && typeof chrome.downloads.showDefaultFolder === "function") {
+          chrome.downloads.showDefaultFolder();
+        }
+        sendResponse({ ok: true, fallback: "defaultFolder" });
+      } catch (e) {
+        sendResponse({ ok: false, error: String((e && e.message) || e) });
+      }
+    }).catch((e) => sendResponse({ ok: false, error: String((e && e.message) || e) }));
+    return true;
+  }
+
+  if (msg.type === "SN_FLOW_OPEN_DOWNLOADS_FOLDER") {
+    try {
+      if (chrome.downloads && typeof chrome.downloads.showDefaultFolder === "function") {
+        chrome.downloads.showDefaultFolder();
+        sendResponse({ ok: true });
+      } else {
+        sendResponse({ ok: false, error: "showDefaultFolder not supported" });
+      }
+    } catch (e) {
+      sendResponse({ ok: false, error: String((e && e.message) || e) });
+    }
+    return false;
   }
 
   if (msg.type === "SN_FLOW_STATUS") {
