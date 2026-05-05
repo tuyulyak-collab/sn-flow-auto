@@ -40,13 +40,7 @@
     const itemMode = item.mode || (settings && settings.mode) || "image";
     const itemRatio = item.aspectRatio || (settings && settings.aspectRatio) || "16:9";
     const itemCount = parseInt(item.outputCount || (settings && settings.outputCount) || 1, 10);
-    Log.log("runItem start", {
-      id: item.id,
-      mode: itemMode,
-      ratio: itemRatio,
-      count: itemCount,
-      promptLen: item.prompt.length,
-    });
+    Log.log(`run #${(item.id || "").slice(-4)}: ${itemMode} ${itemRatio} ×${itemCount} (${item.prompt.length} chars)`);
 
     // 0) apply Flow's native settings via the radix dropdown (best-effort).
     //   For chain video steps we additionally pick the configured Veo model
@@ -63,7 +57,7 @@
           outputCount: itemCount,
           model: itemModel,
         });
-        Log.log("settings applied", applied);
+        Log.log(`settings: ${itemMode} · ${itemRatio} · ×${itemCount}` + (itemModel ? ` · ${itemModel}` : ""));
       } catch (e) {
         Log.warn("settings apply failed", String(e && e.message || e));
       }
@@ -107,15 +101,8 @@
       },
       { attempts: 3, baseDelay: 1000, onAttempt: (n) => n > 1 && Log.warn("prompt input retry", { attempt: n }) },
     );
-    Log.log("prompt input found", {
-      tag: promptEl.tagName,
-      slate: promptEl.getAttribute("data-slate-editor") === "true",
-      role: promptEl.getAttribute("role") || "",
-    });
     await PromptInput.setPromptText(promptEl, item.prompt);
-    Log.log("prompt fill verified", {
-      preview: (PromptInput.readPromptText(promptEl) || "").slice(0, 60),
-    });
+    Log.log(`prompt: "${(PromptInput.readPromptText(promptEl) || "").slice(0, 50)}"`);
     await Retry.sleep((settings && settings.promptInputDelayMs) || 250);
 
     // snapshot media URLs before generation
@@ -150,7 +137,7 @@
       if (!r || !r.url) throw new Error("timed out waiting for media");
       result = { mode: r.mode, items: r.all && r.all.length ? r.all : [{ url: r.url, element: r.element }] };
     }
-    Log.log("media detected", { count: result.items.length, mode: result.mode });
+    Log.log(`got ${result.items.length} ${result.mode} file${result.items.length === 1 ? "" : "s"}`);
 
     // 4) download each item — retry each download up to 2 times on failure
     await reportStatus(item.id, "downloading");
@@ -167,7 +154,7 @@
           { attempts: 2, baseDelay: 1500, onAttempt: (n) => n > 1 && Log.warn("download retry", { i, attempt: n }) },
         );
         downloads.push({ ok: true, ...dl });
-        Log.log("download triggered", { i, filename });
+        Log.log(`saved → ${filename}`);
       } catch (e) {
         downloads.push({ ok: false, error: String((e && e.message) || e), filename });
         Log.error("download failed", { i, e: String((e && e.message) || e) });

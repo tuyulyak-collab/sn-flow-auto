@@ -14,19 +14,55 @@
     listeners: new Set(),
   };
 
-  function nowIso() {
-    return new Date().toISOString();
+  function nowHHMMSS() {
+    const d = new Date();
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    const ss = String(d.getSeconds()).padStart(2, "0");
+    return `${hh}:${mm}:${ss}`;
+  }
+
+  // Render the `extra` payload of a log call in a human-friendly, terse way.
+  // Strings are passed through. Objects are flattened into `key=value` pairs
+  // (max 4 keys, values truncated to 32 chars) so the popup log never gets
+  // a wall of JSON like `{cooldownEvery:5,cooldownMs:180000,adaptiveBackoff
+  // :true,backoffMultiplier:2,...}`.
+  function fmtExtra(extra) {
+    if (extra === undefined || extra === null || extra === "") return "";
+    if (typeof extra === "string") return extra;
+    if (typeof extra !== "object") return String(extra);
+    try {
+      const parts = [];
+      const keys = Object.keys(extra).slice(0, 4);
+      for (const k of keys) {
+        let v = extra[k];
+        if (v === null || v === undefined) continue;
+        if (typeof v === "object") {
+          // one level deep — just count keys / array length
+          if (Array.isArray(v)) v = `[${v.length}]`;
+          else v = `{${Object.keys(v).length}}`;
+        } else {
+          v = String(v);
+          if (v.length > 32) v = v.slice(0, 29) + "…";
+        }
+        parts.push(`${k}=${v}`);
+      }
+      const remainder = Object.keys(extra).length - keys.length;
+      if (remainder > 0) parts.push(`+${remainder}…`);
+      return parts.join(" ");
+    } catch (_) {
+      return "";
+    }
   }
 
   function fmt(level, msg, extra) {
-    let line = `[${nowIso()}] [${level.toUpperCase()}] ${msg}`;
-    if (extra !== undefined) {
-      try {
-        line += " " + (typeof extra === "string" ? extra : JSON.stringify(extra));
-      } catch (_) {
-        // ignore circular structures
-      }
-    }
+    // For info-level lines we omit the level tag so the log reads as a
+    // simple `HH:MM:SS msg …` stream. Warn / error / debug keep their
+    // tag so problems still stand out.
+    const tag = level === "info" ? "" : `[${level.toUpperCase()}] `;
+    let line = `[${nowHHMMSS()}] ${tag}${msg}`;
+    const tail = fmtExtra(extra);
+    if (tail) line += " \u2014 " + tail;
     return line;
   }
 
