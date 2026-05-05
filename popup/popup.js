@@ -244,7 +244,16 @@
     els.start.addEventListener("click", async () => { await sendCmd("START"); refresh(); });
     els.pause.addEventListener("click", async () => { await sendCmd("PAUSE"); refresh(); });
     els.resume.addEventListener("click", async () => { await sendCmd("RESUME"); refresh(); });
-    els.stop.addEventListener("click", async () => { await sendCmd("STOP"); refresh(); });
+    els.stop.addEventListener("click", async () => {
+      if (!confirm(
+        "Stop will halt all processing immediately and reset every queue item back to Pending.\n\n" +
+        "Next Start will begin again from item 1.\n\n" +
+        "(Pause/Resume preserves state — use Pause if you want to keep position.)\n\n" +
+        "Continue?"
+      )) return;
+      await sendCmd("STOP");
+      refresh();
+    });
     els.retry.addEventListener("click", async () => { await sendCmd("RETRY_FAILED"); refresh(); });
     els.clear.addEventListener("click", async () => {
       if (!confirm("Clear the entire queue?")) return;

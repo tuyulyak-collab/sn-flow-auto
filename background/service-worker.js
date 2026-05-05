@@ -289,18 +289,27 @@ async function resumeQueue() {
 }
 
 async function stopQueue() {
-  // mark currentId item back to pending (best-effort)
-  const run = await Storage.getRunState();
-  if (run && run.currentId) {
-    await Storage.updateItem(run.currentId, { status: "pending" });
-  }
-  // Reset any other in-flight statuses
+  // Stop = halt + full reset.
+  // Every item (including completed/failed/skipped) goes back to pending so the
+  // next Start begins again from item 1. Pacer state is reset so streak/cooldown
+  // is forgotten. Pause/Resume are intentionally NOT this — they preserve state.
   const queue = await Storage.getQueue();
-  await Storage.setQueue(Queue.resetActive(queue));
+  const reset = queue.map((q) => ({
+    ...q,
+    status: "pending",
+    attempts: 0,
+    error: undefined,
+    filename: undefined,
+    filenames: undefined,
+    mediaUrl: undefined,
+    downloadId: undefined,
+    updatedAt: Date.now(),
+  }));
+  await Storage.setQueue(reset);
   await Storage.setRunState({ running: false, paused: false, currentId: null });
-  // Reset pacer too — fresh streak/cooldown on next Start
   if (pacer) pacer.reset();
-  return { ok: true };
+  Log.log("queue stopped + fully reset", { count: reset.length });
+  return { ok: true, resetCount: reset.length };
 }
 
 async function retryFailed() {
@@ -419,16 +428,28 @@ chrome.runtime.onStartup && chrome.runtime.onStartup.addListener(async () => {
 // hangs / errors. We watch tabs.onRemoved and tabs.onUpdated to:
 //   - mark the in-flight item back to pending (so Retry Failed picks it up)
 //   - pause the run with a clear error state so the popup tells the user
+async function revertInFlightAndStop(reason) {
+  // Best-effort: revert the in-flight item to pending so it isn't lost, then
+  // also defensively reset any other active-status items (only one item runs
+  // at a time today, but this guards against stale state). Stops the run.
+  const run = await Storage.getRunState();
+  if (!run || !run.running) return;
+  const queue = await Storage.getQueue();
+  const reset = Queue.resetActive(queue);
+  if (run.currentId) {
+    const idx = reset.findIndex((q) => q.id === run.currentId);
+    if (idx !== -1) {
+      reset[idx] = { ...reset[idx], status: "pending", error: reason, updatedAt: Date.now() };
+    }
+  }
+  await Storage.setQueue(reset);
+  await Storage.setRunState({ running: false, paused: false, currentId: null });
+}
+
 chrome.tabs && chrome.tabs.onRemoved && chrome.tabs.onRemoved.addListener(async (tabId) => {
   if (lastFlowTabId !== tabId) return;
   Log.warn("Flow tab closed mid-run", { tabId });
-  const run = await Storage.getRunState();
-  if (run && run.running) {
-    if (run.currentId) {
-      await Storage.updateItem(run.currentId, { status: "pending", error: "Flow tab closed" });
-    }
-    await Storage.setRunState({ running: false, paused: false, currentId: null });
-  }
+  await revertInFlightAndStop("Flow tab closed");
   lastFlowTabId = null;
 });
 
@@ -439,12 +460,6 @@ chrome.tabs && chrome.tabs.onUpdated && chrome.tabs.onUpdated.addListener(async 
   try { stillFlow = FLOW_URL_MATCH.test(new URL(tab.url).hostname); } catch (_) {}
   if (stillFlow) return;
   Log.warn("Flow tab navigated away mid-run", { tabId, url: tab.url });
-  const run = await Storage.getRunState();
-  if (run && run.running) {
-    if (run.currentId) {
-      await Storage.updateItem(run.currentId, { status: "pending", error: "Flow tab navigated away" });
-    }
-    await Storage.setRunState({ running: false, paused: false, currentId: null });
-  }
+  await revertInFlightAndStop("Flow tab navigated away");
   lastFlowTabId = null;
 });
