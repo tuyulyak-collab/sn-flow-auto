@@ -293,7 +293,29 @@
         { title: "Stop & reset queue?", okText: "Stop & reset", cancelText: "Cancel" },
       );
       if (!ok) return;
-      await sendCmd("STOP");
+      // Reset storage directly from the popup so the reset is guaranteed even
+      // if the MV3 popup closes mid-flight after the modal dismisses (which
+      // would otherwise cancel an in-flight chrome.runtime.sendMessage and
+      // its callback, leaving the SW's stopQueue response un-awaited and the
+      // popup's refresh() never called). The SW STOP message is still sent
+      // fire-and-forget to reset pacer / loop state in the SW.
+      try {
+        const queue = await Storage.getQueue();
+        const reset = queue.map((q) => ({
+          ...q,
+          status: "pending",
+          attempts: 0,
+          error: undefined,
+          filename: undefined,
+          filenames: undefined,
+          mediaUrl: undefined,
+          downloadId: undefined,
+          updatedAt: Date.now(),
+        }));
+        await Storage.setQueue(reset);
+        await Storage.setRunState({ running: false, paused: false, currentId: null });
+      } catch (_) {}
+      try { chrome.runtime.sendMessage({ type: "SN_FLOW_CMD", payload: { cmd: "STOP" } }); } catch (_) {}
       refresh();
     });
     els.retry.addEventListener("click", async () => { await sendCmd("RETRY_FAILED"); refresh(); });
