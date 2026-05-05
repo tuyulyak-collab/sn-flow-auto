@@ -91,29 +91,172 @@
     return scored[0].el;
   }
 
-  async function clickGenerate(promptEl) {
-    const btn = findGenerateButton(promptEl);
-    if (!btn) {
-      // last-ditch: try Enter key on the prompt
-      if (promptEl) {
-        const ev = new KeyboardEvent("keydown", {
-          key: "Enter", code: "Enter", which: 13, keyCode: 13, bubbles: true,
-        });
-        promptEl.dispatchEvent(ev);
+  // Returns a small descriptor for logging — exposes the chosen button's
+  // tag/role/text/icon glyphs so DOM-drift bugs are debuggable from the
+  // Flow tab DevTools console without inspecting outerHTML by hand.
+  function describeButton(btn) {
+    if (!btn) return null;
+    const text = (btn.innerText || btn.textContent || "").trim().slice(0, 40);
+    const aria = btn.getAttribute("aria-label") || "";
+    const type = btn.getAttribute("type") || "";
+    const icons = [];
+    try {
+      for (const i of btn.querySelectorAll("i, span")) {
+        const t = (i.textContent || "").trim();
+        if (t && /^[a-z_]{3,30}$/i.test(t) && t.length < 24) icons.push(t);
       }
-      return false;
-    }
-    try { btn.scrollIntoView({ block: "center" }); } catch (_) {}
-    // Use realClick (pointerdown + pointerup + click) because Radix/React
-    // ignore .click() in some flows.
-    const Settings = root.SNFlowSettings;
-    if (Settings && typeof Settings.realClick === "function") {
-      Settings.realClick(btn);
-    } else {
-      btn.click();
-    }
-    return true;
+    } catch (_) {}
+    return { tag: btn.tagName, type, aria, text, icons: icons.slice(0, 4) };
   }
 
-  root.SNFlowGenerate = { findGenerateButton, clickGenerate };
+  // Synthesise a full Enter key sequence on the prompt input. Many form-style
+  // submit handlers (and Slate-driven editors) react to the Enter keystroke
+  // even when our scoring picked the wrong "send" button.
+  function pressEnter(el) {
+    if (!el) return false;
+    try {
+      el.focus();
+      const opts = {
+        key: "Enter", code: "Enter", keyCode: 13, which: 13,
+        bubbles: true, cancelable: true, composed: true,
+      };
+      el.dispatchEvent(new KeyboardEvent("keydown", opts));
+      el.dispatchEvent(new KeyboardEvent("keypress", opts));
+      el.dispatchEvent(new KeyboardEvent("keyup", opts));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // After clicking submit, poll briefly for a visible signal that Flow
+  // actually accepted the submission. Heuristics:
+  //   - The prompt input clears (Flow blanks the bar after a successful submit)
+  //   - The submit button becomes disabled / aria-disabled
+  //   - A Flow validation toast surfaces ("Prompt must be provided" et al.)
+  //     We treat this as a *negative* signal — if it shows up, the click was
+  //     received but the prompt wasn't in Slate's controlled state, so we
+  //     return a sentinel telling the caller to surface a friendly error
+  //     instead of waiting 5 minutes for media that will never arrive.
+  async function verifySubmitted(promptEl, btn, beforeText, totalMs = 2500) {
+    const start = Date.now();
+    const beforeTrim = (beforeText || "").trim();
+    while (Date.now() - start < totalMs) {
+      await new Promise((r) => setTimeout(r, 120));
+
+      // Negative signal: validation toast.
+      const toast = findValidationToast();
+      if (toast) return { ok: false, validationError: toast };
+
+      // Positive signal A: prompt input cleared.
+      try {
+        if (promptEl) {
+          const cur = (
+            promptEl.tagName === "TEXTAREA" || promptEl.tagName === "INPUT"
+              ? String(promptEl.value || "")
+              : String(promptEl.innerText || promptEl.textContent || "")
+          ).trim();
+          if (beforeTrim && !cur) return { ok: true, signal: "input-cleared" };
+          // Some Flow surfaces leave the prompt visible but mark it readonly
+          // / aria-busy after submit.
+          const busy = promptEl.getAttribute("aria-busy") === "true"
+            || promptEl.getAttribute("aria-readonly") === "true";
+          if (busy) return { ok: true, signal: "input-busy" };
+        }
+      } catch (_) {}
+
+      // Positive signal B: button became disabled (Flow disables the submit
+      // button while a generation is in flight).
+      try {
+        if (btn && (btn.disabled || btn.getAttribute("aria-disabled") === "true")) {
+          return { ok: true, signal: "button-disabled" };
+        }
+      } catch (_) {}
+    }
+    return { ok: false, signal: "no-signal" };
+  }
+
+  // Look for Flow's "Prompt must be provided" / similar validation toast in
+  // any of the page's live regions or alert nodes. Returns the offending
+  // text (truncated) or null. Matched against patterns conservatively to
+  // avoid false positives from rate-limit / generation-error toasts (those
+  // are handled separately by content/dom-error-watcher.js).
+  const PROMPT_MISSING_RE =
+    /(prompt\s+must\s+be\s+provided|please\s+(enter|provide)\s+(a\s+)?prompt|prompt\s+is\s+required|prompt\s+cannot\s+be\s+empty|enter\s+a\s+prompt)/i;
+
+  function findValidationToast() {
+    try {
+      const sels = [
+        '[role="alert"]',
+        '[role="status"]',
+        '[aria-live="assertive"]',
+        '[aria-live="polite"]',
+      ];
+      for (const sel of sels) {
+        for (const el of document.querySelectorAll(sel)) {
+          if (!D.isVisible(el)) continue;
+          const txt = (el.innerText || el.textContent || "").trim();
+          if (!txt || txt.length < 5) continue;
+          if (PROMPT_MISSING_RE.test(txt)) return txt.slice(0, 160);
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  async function clickGenerate(promptEl) {
+    const Log = root.SNFlowLogger;
+    const btn = findGenerateButton(promptEl);
+
+    // Capture prompt-input value before submit so verifySubmitted can detect
+    // a clear-on-submit signal.
+    const beforeText = promptEl
+      ? (promptEl.tagName === "TEXTAREA" || promptEl.tagName === "INPUT"
+          ? String(promptEl.value || "")
+          : String(promptEl.innerText || promptEl.textContent || ""))
+      : "";
+
+    let clickedVia = null;
+    if (btn) {
+      try { btn.scrollIntoView({ block: "center" }); } catch (_) {}
+      const Settings = root.SNFlowSettings;
+      if (Settings && typeof Settings.realClick === "function") {
+        Settings.realClick(btn);
+      } else {
+        btn.click();
+      }
+      clickedVia = "button";
+      if (Log && Log.log) Log.log("[SN Flow] generate: clicked button", describeButton(btn));
+    } else if (Log && Log.warn) {
+      Log.warn("[SN Flow] generate: no button matched, will fall back to Enter on prompt");
+    }
+
+    // First verification — did the button click do anything?
+    let result = await verifySubmitted(promptEl, btn, beforeText, btn ? 2500 : 0);
+    if (result.validationError) {
+      throw new Error("Flow rejected submit: " + result.validationError);
+    }
+    if (result.ok) return true;
+
+    // Fallback A: Enter keystroke on the prompt input. Many submit handlers
+    // listen for Enter as the canonical form-submit action.
+    if (promptEl) {
+      pressEnter(promptEl);
+      clickedVia = clickedVia ? clickedVia + "+enter" : "enter";
+      if (Log && Log.log) Log.log("[SN Flow] generate: pressed Enter on prompt input as fallback");
+      result = await verifySubmitted(promptEl, btn, beforeText, 2500);
+      if (result.validationError) {
+        throw new Error("Flow rejected submit: " + result.validationError);
+      }
+      if (result.ok) return true;
+    }
+
+    // Nothing worked. Treat as "button not found" — caller will retry.
+    if (Log && Log.warn) {
+      Log.warn("[SN Flow] generate: submit not detected after click and Enter fallback", { clickedVia });
+    }
+    return false;
+  }
+
+  root.SNFlowGenerate = { findGenerateButton, clickGenerate, describeButton };
 })(typeof self !== "undefined" ? self : this);
