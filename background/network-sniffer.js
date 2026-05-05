@@ -76,7 +76,11 @@
         "*://*.flow.google/*",
         "*://aitestkitchen.withgoogle.com/*",
       ],
-      types: ["xmlhttprequest", "fetch", "main_frame", "sub_frame"],
+      // "fetch" is NOT a valid chrome.webRequest resource type — fetch requests
+      // are reported as "xmlhttprequest" in MV3. Including "fetch" causes the
+      // entire service worker registration to fail with status 15, which made
+      // every popup → SW command (START/PAUSE/RESUME/STOP) silently no-op.
+      types: ["xmlhttprequest", "main_frame", "sub_frame"],
     };
 
     onCompletedListener = (details) => {
