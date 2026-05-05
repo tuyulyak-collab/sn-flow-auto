@@ -227,6 +227,46 @@
     await refresh();
   }
 
+  // Custom in-popup confirm modal. Native window.confirm() in MV3 popups
+  // closes the popup on focus-loss, which kills any post-await code (so e.g.
+  // a Stop click never actually sends STOP). Using HTMLDialogElement keeps
+  // the popup focused so the click handler can resume normally.
+  function snfConfirm(message, { title = "Confirm", okText = "OK", cancelText = "Cancel" } = {}) {
+    return new Promise((resolve) => {
+      const dlg = $("snf-confirm");
+      const titleEl = $("snf-confirm-title");
+      const msgEl = $("snf-confirm-message");
+      const okBtn = $("snf-confirm-ok");
+      const cancelBtn = $("snf-confirm-cancel");
+      // Fall back to native confirm() if <dialog> is somehow unavailable, so
+      // we never silently lose a confirmation.
+      if (!dlg || typeof dlg.showModal !== "function") {
+        resolve(window.confirm(message));
+        return;
+      }
+      titleEl.textContent = title;
+      msgEl.textContent = message;
+      okBtn.textContent = okText;
+      cancelBtn.textContent = cancelText;
+      const finish = (val) => {
+        okBtn.removeEventListener("click", onOk);
+        cancelBtn.removeEventListener("click", onCancel);
+        dlg.removeEventListener("close", onClose);
+        if (dlg.open) dlg.close();
+        resolve(val);
+      };
+      const onOk = () => finish(true);
+      const onCancel = () => finish(false);
+      // Esc / backdrop close → treat as cancel.
+      const onClose = () => finish(false);
+      okBtn.addEventListener("click", onOk);
+      cancelBtn.addEventListener("click", onCancel);
+      dlg.addEventListener("close", onClose);
+      dlg.showModal();
+      cancelBtn.focus();
+    });
+  }
+
   function sendCmd(cmd) {
     return new Promise((resolve) => {
       try {
@@ -245,18 +285,25 @@
     els.pause.addEventListener("click", async () => { await sendCmd("PAUSE"); refresh(); });
     els.resume.addEventListener("click", async () => { await sendCmd("RESUME"); refresh(); });
     els.stop.addEventListener("click", async () => {
-      if (!confirm(
+      const ok = await snfConfirm(
         "Stop will halt all processing immediately and reset every queue item back to Pending.\n\n" +
         "Next Start will begin again from item 1.\n\n" +
         "(Pause/Resume preserves state — use Pause if you want to keep position.)\n\n" +
-        "Continue?"
-      )) return;
+        "Continue?",
+        { title: "Stop & reset queue?", okText: "Stop & reset", cancelText: "Cancel" },
+      );
+      if (!ok) return;
       await sendCmd("STOP");
       refresh();
     });
     els.retry.addEventListener("click", async () => { await sendCmd("RETRY_FAILED"); refresh(); });
     els.clear.addEventListener("click", async () => {
-      if (!confirm("Clear the entire queue?")) return;
+      const ok = await snfConfirm("Clear the entire queue?", {
+        title: "Clear queue?",
+        okText: "Clear",
+        cancelText: "Cancel",
+      });
+      if (!ok) return;
       await sendCmd("CLEAR"); refresh();
     });
     els.logClear.addEventListener("click", async () => {

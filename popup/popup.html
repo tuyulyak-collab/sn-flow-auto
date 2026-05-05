@@ -157,6 +157,24 @@
     <span>Files saved to <code>SN_Flow_Auto/</code> in your Downloads folder</span>
   </footer>
 
+  <!--
+    Custom in-popup confirm modal. We avoid native window.confirm() in MV3
+    popups because the popup loses focus when the OS-level dialog opens, which
+    closes the popup and kills any post-await code (so e.g. Stop never sends
+    its STOP command). HTMLDialogElement.showModal() is same-document so the
+    popup keeps focus and the click handler resumes normally.
+  -->
+  <dialog id="snf-confirm" class="snf-dialog">
+    <div class="snf-dialog-body">
+      <h3 id="snf-confirm-title" class="snf-dialog-title">Confirm</h3>
+      <p id="snf-confirm-message" class="snf-dialog-message"></p>
+    </div>
+    <div class="snf-dialog-actions">
+      <button type="button" id="snf-confirm-cancel" class="snf-btn snf-secondary">Cancel</button>
+      <button type="button" id="snf-confirm-ok" class="snf-btn snf-primary">OK</button>
+    </div>
+  </dialog>
+
   <script src="../core/logger.js"></script>
   <script src="../core/retry.js"></script>
   <script src="../core/filename-template.js"></script>

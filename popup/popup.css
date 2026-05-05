@@ -240,3 +240,44 @@ html, body {
   border-radius: 6px;
   color: #4a1c1c;
 }
+
+/* In-popup confirm modal — replaces native window.confirm() (which closes the
+   popup in MV3). Uses HTMLDialogElement.showModal() with the same SaaS palette. */
+.snf-dialog {
+  border: none;
+  border-radius: 14px;
+  padding: 0;
+  width: 320px;
+  max-width: calc(100vw - 24px);
+  background: #fffaf3;
+  box-shadow: 0 12px 32px rgba(74, 28, 28, 0.22);
+  color: #2b1a1a;
+}
+.snf-dialog::backdrop {
+  background: rgba(74, 28, 28, 0.32);
+}
+.snf-dialog-body {
+  padding: 16px 16px 8px 16px;
+}
+.snf-dialog-title {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 800;
+  color: #4a1c1c;
+}
+.snf-dialog-message {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #4a2b2b;
+  white-space: pre-line;
+}
+.snf-dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 8px 16px 16px 16px;
+}
+.snf-dialog-actions .snf-btn {
+  min-width: 88px;
+}
