@@ -125,12 +125,6 @@
     } catch (_) {}
   }
 
-  function clearSlateEditor(el) {
-    // Select the entire Slate value, then let insertText overwrite it.
-    selectAll(el);
-    try { document.execCommand("delete", false); } catch (_) {}
-  }
-
   // True when the editor's controlled state still considers the prompt empty.
   // Flow renders a placeholder ("What do you want to create?" / similar) only
   // when Slate's React-controlled value is empty. So if a placeholder element
@@ -152,9 +146,15 @@
   // Insert text by simulating a paste. ClipboardEvent + DataTransfer is the
   // path Slate handles via its onPaste handler — it will call editor.insertText
   // (or insertFragment) which updates the React-controlled model.
+  //
+  // We DO NOT pre-delete the content with execCommand("delete") — that mutates
+  // the contenteditable DOM directly and breaks Slate's React reconciler
+  // (NotFoundError on removeChild in framework-*.js, which manifests as Flow's
+  // "Application error: a client-side exception" overlay). Selecting the
+  // existing range is enough — Slate's insertText replaces the selection via
+  // its own API, which keeps the React virtual DOM in sync.
   function tryPasteInsert(el, text) {
     selectAll(el);
-    try { document.execCommand("delete", false); } catch (_) {}
     try {
       const dt = new DataTransfer();
       dt.setData("text/plain", text);
@@ -180,9 +180,10 @@
   // observer). If Slate doesn't preventDefault, we also run execCommand to
   // perform the underlying DOM mutation; if Slate does preventDefault, it
   // owns the mutation itself and we just dispatch a follow-up input event.
+  // Same rule as tryPasteInsert: we never call execCommand("delete") to clear
+  // first — selection + insert lets the editor replace via its own pipeline.
   function tryBeforeInputInsert(el, text) {
     selectAll(el);
-    try { document.execCommand("delete", false); } catch (_) {}
     try {
       const before = new InputEvent("beforeinput", {
         bubbles: true,
@@ -210,10 +211,10 @@
 
   // Fallback: explicit execCommand("insertText") with a fresh selection. This
   // is the original path; kept as a last resort for environments where the
-  // event-dispatch routes above fail.
+  // event-dispatch routes above fail. execCommand("insertText") natively
+  // replaces the current selection — no separate delete step needed.
   function tryExecCommandInsert(el, text) {
     selectAll(el);
-    try { document.execCommand("delete", false); } catch (_) {}
     let inserted = false;
     try { inserted = !!(document.execCommand && document.execCommand("insertText", false, text)); } catch (_) {}
     if (inserted) {
@@ -296,20 +297,11 @@
       if (Log && Log.warn) Log.warn("[SN Flow] prompt insert strategy did not commit; trying next", { name: s.name });
     }
 
-    // Final fallback: brute-force textNode append (DOES NOT update Slate, but
-    // gives users a visible artefact in case they're testing on a non-Slate
-    // contenteditable). For Slate this will throw below.
-    try {
-      el.innerHTML = "";
-      el.appendChild(document.createTextNode(text));
-      el.dispatchEvent(new InputEvent("input", {
-        bubbles: true, cancelable: false, composed: true,
-        inputType: "insertText", data: text,
-      }));
-    } catch (_) {}
-    const ok = await pollForCommit(el, text, 400);
-    if (ok) return true;
-
+    // No brute-force innerHTML fallback here: directly mutating innerHTML on
+    // a Slate-controlled contenteditable would crash Flow's React reconciler
+    // (the same NotFoundError on removeChild we now actively detect in
+    // generate-button.js#isFlowCrashed). Better to fail loudly than corrupt
+    // the page state.
     const tag = el.tagName + (isSlate ? "[slate]" : "");
     const msg = "prompt fill verification failed: Slate state stayed empty after every insert strategy (" + tag + ")";
     if (Log && Log.error) Log.error("[SN Flow] " + msg);
