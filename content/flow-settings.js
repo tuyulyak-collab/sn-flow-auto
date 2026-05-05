@@ -198,17 +198,125 @@
     return out;
   }
 
+  // ---- model picker (PR #7, Chain mode) ----
+
+  // Model name → list of label substrings that may appear on Flow's UI
+  // for that model. Match is case-insensitive. Order matters: the first
+  // matching menu item wins. "auto" means "leave whatever's currently
+  // selected in Flow alone" — caller should not pass "auto" to applyModel.
+  const MODEL_LABELS = {
+    "veo":   ["veo 3", "veo3", "veo "],
+    "veo-2": ["veo 2", "veo2", "veo-2"],
+  };
+
+  function findModelMenuItem(menuRoot, model) {
+    const labels = MODEL_LABELS[model];
+    if (!labels) return null;
+    // Flow may render model picker items as <button>, <li>, or [role=menuitem].
+    const candidates = (menuRoot || document).querySelectorAll(
+      'button, [role="menuitem"], [role="option"], [role="radio"], li'
+    );
+    for (const lbl of labels) {
+      for (const c of candidates) {
+        if (!D.isVisible(c) || !D.isEnabled(c)) continue;
+        const txt = (c.textContent || "").toLowerCase().trim();
+        // We want an exact-ish match on the model name in the candidate
+        // text, but the candidate often contains extra chrome ("Quality",
+        // "Beta", icons). Restrict to short-ish entries to avoid clicking
+        // a description blob.
+        if (txt.length > 64) continue;
+        if (txt.includes(lbl)) return c;
+      }
+    }
+    return null;
+  }
+
+  // The model picker may be a *separate* button (not the same dropdown as
+  // mode/ratio/count). Best heuristic: find a button whose visible text
+  // contains a known model name, that is NOT the trigger we already use.
+  function findModelTrigger(excludeTrigger) {
+    const buttons = D.queryAllDeep('button, [role="button"]');
+    for (const el of buttons) {
+      if (!D.isVisible(el) || !D.isEnabled(el)) continue;
+      if (el === excludeTrigger) continue;
+      const txt = (el.innerText || el.textContent || "").toLowerCase();
+      if (/(veo|imagen|nano banana|gemini)/i.test(txt) && txt.length < 80) {
+        return el;
+      }
+    }
+    return null;
+  }
+
+  // applyModel — best-effort. Returns the model name on success, null on no-op.
+  // Tries (in order):
+  //  1. The current open menu — maybe model is one of the menu items.
+  //  2. Click the standalone model trigger (if any), pick from its menu.
+  //  3. Re-open the main settings dropdown and look for model items there.
+  async function applyModel(model) {
+    if (!model || model === "auto") return null;
+    if (!MODEL_LABELS[model]) {
+      Log && Log.warn && Log.warn("[SN Flow] unknown chainVideoModel, skipping", model);
+      return null;
+    }
+
+    // 1) Try whatever's already open
+    const openMenu = document.querySelector('[role="menu"][data-state="open"]');
+    if (openMenu) {
+      const item = findModelMenuItem(openMenu, model);
+      if (item) {
+        realClick(item);
+        await Retry.sleep(220);
+        return model;
+      }
+    }
+
+    // 2) Standalone model trigger
+    const settingsTrigger = findSettingsTrigger();
+    const modelTrigger = findModelTrigger(settingsTrigger);
+    if (modelTrigger) {
+      try { modelTrigger.scrollIntoView({ block: "center" }); } catch (_) {}
+      realClick(modelTrigger);
+      await Retry.sleep(220);
+      const newMenu = await Retry.waitFor(() => {
+        const m = document.querySelector('[role="menu"][data-state="open"]')
+          || D.queryAllDeep('[role="menu"], [role="listbox"]').find((el) => D.isVisible(el));
+        return m || null;
+      }, { timeout: 2000, interval: 80 }).catch(() => null);
+      if (newMenu) {
+        const item = findModelMenuItem(newMenu, model);
+        if (item) {
+          realClick(item);
+          await Retry.sleep(220);
+          // close menu
+          document.dispatchEvent(new KeyboardEvent("keydown", {
+            key: "Escape", code: "Escape", which: 27, keyCode: 27, bubbles: true,
+          }));
+          await Retry.sleep(120);
+          return model;
+        }
+      }
+    }
+
+    Log && Log.warn && Log.warn("[SN Flow] could not find model picker for", model);
+    return null;
+  }
+
   /**
    * Apply requested settings on the page by interacting with the Flow dropdown.
    * Best-effort: returns the fields that were applied successfully.
+   *
+   * `model` is honored only when truthy and not "auto" — Chain mode video
+   * step uses this to switch to a Veo model. Image and plain-video items
+   * generally pass model=null and leave the current selection alone.
    */
   async function applySettings(req) {
     const want = {
       mode: (req && req.mode) ? String(req.mode).toLowerCase() : null,
       aspectRatio: (req && req.aspectRatio) ? String(req.aspectRatio) : null,
       outputCount: (req && req.outputCount) ? parseInt(req.outputCount, 10) : null,
+      model: (req && req.model) ? String(req.model).toLowerCase() : null,
     };
-    if (!want.mode && !want.aspectRatio && !want.outputCount) return readActive();
+    if (!want.mode && !want.aspectRatio && !want.outputCount && !want.model) return readActive();
 
     const opened = await openDropdown();
     if (!opened || !opened.menu) {
@@ -216,7 +324,7 @@
       return readActive();
     }
     const { trigger, menu } = opened;
-    const applied = { mode: null, aspectRatio: null, outputCount: null };
+    const applied = { mode: null, aspectRatio: null, outputCount: null, model: null };
 
     try {
       if (want.mode === "image" || want.mode === "video") {
@@ -241,11 +349,33 @@
         if (await clickTab(tab)) applied.outputCount = want.outputCount;
         await Retry.sleep(120);
       }
+
+      if (want.model && want.model !== "auto") {
+        // Try the in-dropdown path first — model items might be siblings of
+        // mode/ratio/count tabs in the radix menu.
+        const item = findModelMenuItem(menu, want.model);
+        if (item) {
+          realClick(item);
+          await Retry.sleep(220);
+          applied.model = want.model;
+        }
+      }
     } finally {
       await closeDropdown(trigger);
+    }
+
+    // If the model wasn't accessible inside the main dropdown, try the
+    // standalone trigger path AFTER closing the main menu.
+    if (want.model && want.model !== "auto" && !applied.model) {
+      const m = await applyModel(want.model);
+      if (m) applied.model = m;
     }
     return applied;
   }
 
-  root.SNFlowSettings = { applySettings, readActive, realClick, findSettingsTrigger, RATIO_TAB, RATIO_ICON };
+  root.SNFlowSettings = {
+    applySettings, applyModel, readActive,
+    realClick, findSettingsTrigger,
+    RATIO_TAB, RATIO_ICON, MODEL_LABELS,
+  };
 })(typeof self !== "undefined" ? self : this);

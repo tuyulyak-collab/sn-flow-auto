@@ -19,3 +19,4 @@ __pycache__/
 # secrets
 .env
 *.env.local
+PHASE_B_PLAN.md

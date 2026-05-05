@@ -125,6 +125,7 @@ async function ensureContentInjected(tabId) {
         "content/flow-settings.js",
         "content/prompt-input.js",
         "content/generate-button.js",
+        "content/flow-add-media.js",
         "content/result-watcher.js",
         "content/downloader.js",
         "content/dom-error-watcher.js",
@@ -416,6 +417,34 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     getOrMakePacer().then((p) => {
       sendResponse({ ok: true, state: p.getState() });
     }).catch((e) => sendResponse({ ok: false, error: String(e && e.message || e) }));
+    return true;
+  }
+
+  if (msg.type === "SN_FLOW_FETCH_BLOB") {
+    // CORS-fallback for content/flow-add-media.js: when the page-context
+    // fetch is blocked, the SW fetches the URL (different origin context)
+    // and returns the result as a data: URL the content script can rehydrate.
+    const url = (msg.payload && msg.payload.url) || "";
+    if (!url) { sendResponse({ ok: false, error: "missing url" }); return false; }
+    (async () => {
+      try {
+        const r = await fetch(url, { credentials: "include" });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const buf = await r.arrayBuffer();
+        const mime = r.headers.get("content-type") || "image/png";
+        // Convert ArrayBuffer to base64 data URL (chunked to avoid stack overflow)
+        const bytes = new Uint8Array(buf);
+        let bin = "";
+        const CHUNK = 0x8000;
+        for (let i = 0; i < bytes.length; i += CHUNK) {
+          bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+        }
+        const b64 = btoa(bin);
+        sendResponse({ ok: true, dataUrl: "data:" + mime + ";base64," + b64, bytes: bytes.length });
+      } catch (e) {
+        sendResponse({ ok: false, error: String((e && e.message) || e) });
+      }
+    })();
     return true;
   }
 

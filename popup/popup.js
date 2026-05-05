@@ -24,9 +24,15 @@
 
   function renderQueue(queue) {
     els.queueBody.innerHTML = "";
+    // Pre-compute id -> queue position so chain video rows can show
+    // "from #N" pointing at their parent image row.
+    const idToPos = new Map();
+    queue.forEach((it, i) => idToPos.set(it.id, i + 1));
+
     queue.forEach((item, idx) => {
       const tr = document.createElement("tr");
       if (item.chainStep === "video") tr.classList.add("snf-chain-row");
+      if (item.chainStep === "image") tr.classList.add("snf-chain-parent-row");
 
       const tdIdx = document.createElement("td");
       tdIdx.textContent = String(idx + 1);
@@ -40,6 +46,15 @@
         arrow.textContent = "↳";
         tdPrompt.appendChild(arrow);
         tdPrompt.appendChild(document.createTextNode(trim(item.prompt, 80)));
+        // Show "from #N" linkage so users see which image feeds this video.
+        const parentPos = item.parentId ? idToPos.get(item.parentId) : null;
+        if (parentPos) {
+          const link = document.createElement("span");
+          link.className = "snf-chain-parent-link";
+          link.textContent = ` from #${parentPos}`;
+          link.title = "Parent image step row";
+          tdPrompt.appendChild(link);
+        }
       } else {
         tdPrompt.textContent = trim(item.prompt, 80);
       }
@@ -47,7 +62,8 @@
       const tdMode = document.createElement("td");
       const ratio = item.aspectRatio ? ` · ${item.aspectRatio}` : "";
       const count = item.outputCount && item.outputCount > 1 ? ` · x${item.outputCount}` : "";
-      const chainTag = item.chainStep ? ` · chain` : "";
+      const chainTag = item.chainStep === "image" ? ` · chain·img` :
+                        item.chainStep === "video" ? ` · chain·vid` : "";
       tdMode.textContent = `${item.mode || "image"}${ratio}${count}${chainTag}`;
 
       const tdStatus = document.createElement("td");
@@ -169,9 +185,12 @@
     if (els.chainSuffix && typeof settings.chainPromptSuffix === "string" && els.chainSuffix.value !== settings.chainPromptSuffix) {
       els.chainSuffix.value = settings.chainPromptSuffix;
     }
-    if (els.chainSuffixRow) {
-      els.chainSuffixRow.hidden = !((settings.chainPromptSource || "same") === "suffix");
+    if (els.chainCustom && typeof settings.chainPromptCustom === "string" && els.chainCustom.value !== settings.chainPromptCustom) {
+      els.chainCustom.value = settings.chainPromptCustom;
     }
+    const ps = settings.chainPromptSource || "same";
+    if (els.chainSuffixRow) els.chainSuffixRow.hidden = ps !== "suffix";
+    if (els.chainCustomRow) els.chainCustomRow.hidden = ps !== "custom";
   }
 
   function syncPacingInputs(settings) {
@@ -226,6 +245,7 @@
       chainStrategy: els.chainStrategy ? els.chainStrategy.value : "first",
       chainPromptSource: els.chainPromptSource ? els.chainPromptSource.value : "same",
       chainPromptSuffix: els.chainSuffix ? els.chainSuffix.value : "",
+      chainPromptCustom: els.chainCustom ? els.chainCustom.value : "",
       chainRunOrder: els.chainRunOrder ? els.chainRunOrder.value : "interleave",
       chainVideoAspectRatio: els.chainVideoAspect && els.chainVideoAspect.value ? els.chainVideoAspect.value : null,
       chainVideoModel: els.chainVideoModel ? els.chainVideoModel.value : "auto",
@@ -263,7 +283,30 @@
   }
 
   async function retryItem(id) {
-    await Storage.updateItem(id, { status: "pending", error: undefined, attempts: 0 });
+    // Reset the target item back to pending. If the item is a chain image
+    // step, also cascade-reset all of its chain video children so they can
+    // re-run against the freshly generated image. Without the cascade, a
+    // child whose previous status was "skipped" (because the old image
+    // failed) would never re-fire.
+    const queue = await Storage.getQueue();
+    const target = queue.find((q) => q.id === id);
+    const updated = queue.map((q) => {
+      if (q.id === id) {
+        return { ...q, status: "pending", error: undefined, attempts: 0,
+                 filename: undefined, mediaUrl: undefined, updatedAt: Date.now() };
+      }
+      if (target && target.chainStep === "image" && q.parentId === id) {
+        // Reset the child only if it's already in a terminal state — leaves
+        // a still-running child alone.
+        if (q.status === "completed" || q.status === "failed" || q.status === "skipped") {
+          return { ...q, status: "pending", error: undefined, attempts: 0,
+                   filename: undefined, mediaUrl: undefined, inputMediaUrl: undefined,
+                   updatedAt: Date.now() };
+        }
+      }
+      return q;
+    });
+    await Storage.setQueue(updated);
     await refresh();
   }
   async function skipItem(id) {
@@ -411,11 +454,17 @@
       els.chainPromptSource.addEventListener("change", () => {
         const v = els.chainPromptSource.value;
         if (els.chainSuffixRow) els.chainSuffixRow.hidden = v !== "suffix";
+        if (els.chainCustomRow) els.chainCustomRow.hidden = v !== "custom";
         saveChain({ chainPromptSource: v });
       });
     }
     if (els.chainSuffix) {
       els.chainSuffix.addEventListener("change", () => saveChain({ chainPromptSuffix: els.chainSuffix.value }));
+    }
+    if (els.chainCustom) {
+      els.chainCustom.addEventListener("change", () => saveChain({ chainPromptCustom: els.chainCustom.value }));
+      // also save on blur for textareas — change can fire late
+      els.chainCustom.addEventListener("blur", () => saveChain({ chainPromptCustom: els.chainCustom.value }));
     }
     if (els.chainRunOrder) {
       els.chainRunOrder.addEventListener("change", () => saveChain({ chainRunOrder: els.chainRunOrder.value }));
@@ -498,6 +547,8 @@
       chainPromptSource: $("snf-chain-prompt-source"),
       chainSuffixRow: $("snf-chain-suffix-row"),
       chainSuffix: $("snf-chain-suffix"),
+      chainCustomRow: $("snf-chain-custom-row"),
+      chainCustom: $("snf-chain-custom"),
       chainRunOrder: $("snf-chain-run-order"),
       chainVideoAspect: $("snf-chain-video-aspect"),
       chainVideoModel: $("snf-chain-video-model"),
