@@ -1,19 +1,21 @@
 /* content/downloader.js — trigger the download for a generated tile.
  *
- * Flow's per-tile download flow (May 2026):
+ * Strategy (post PR #13):
+ *   1) If we have a media URL, fire chrome.downloads.download() with our
+ *      SN_flow_{random5}_{ddmmyyyy}.{ext} filename into SN_Flow_Auto/. This
+ *      is the ONLY thing we want to happen on the happy path so the user
+ *      ends up with exactly one renamed file, not two.
+ *   2) Only if the URL-based download throws (or no URL was resolved), fall
+ *      back to clicking Flow's native Download menuitem. Flow's native click
+ *      writes a UUID-named file to the default Downloads folder, which is
+ *      noisy duplicate output the user explicitly does not want.
+ *
+ * Flow's native per-tile download flow (used only as fallback):
  *   1) Hover the tile to reveal an overlay strip with three buttons:
  *        favorite (heart), redo (Reuse prompt), more_vert (More)
- *   2) Click the more_vert button — opens a Radix dropdown with menuitems
- *      like Animate / Add to Prompt / Favorite / Download / Share / ...
- *   3) Click the menuitem whose icon glyph is "download". This triggers
- *      Flow's native download flow (uses the user's session cookies, so it
- *      always succeeds with the original quality file).
- *
- * Because Flow's native click sets the filename, we ALSO fire our own
- * chrome.downloads.download() with the resolved Flow media URL, so the user
- * always ends up with a copy named SN_flow_{random5}_{ddmmyyyy}.{ext} in
- * SN_Flow_Auto/. The Flow native click runs in parallel and saves to the
- * default Downloads folder under the original Flow name (best-effort).
+ *   2) Click more_vert → opens a Radix dropdown with Animate / Add to Prompt
+ *      / Favorite / Download / Share / ...
+ *   3) Click the menuitem whose icon glyph is "download".
  *
  * Public API:
  *   Downloader.downloadResult(mediaEl, mediaUrl, filename)
@@ -161,20 +163,16 @@
 
   /**
    * Trigger a download for a Flow tile. Strategy:
-   *   1) Click Flow's native Download menuitem (preserves quality + auth)
-   *   2) Always also fire chrome.downloads with our SN_flow_* filename if we
-   *      have a media URL (so the user gets a renamed copy in SN_Flow_Auto/)
-   *   3) If we don't have a URL and the native click failed, fall back to the
-   *      first global "Download" button on the page.
+   *   1) Try URL-based download with our SN_flow_* rename (happy path).
+   *   2) Only on failure (or no URL), fall back to Flow's native click
+   *      and finally to a generic global Download button.
+   *
+   * The native click is intentionally NOT fired on the happy path: it
+   * writes a UUID-named duplicate to the user's default Downloads folder,
+   * which is what the user reported as "the rename feature isn't working"
+   * (they were seeing both the renamed copy AND the UUID copy).
    */
   async function downloadResult(mediaEl, mediaUrl, filename) {
-    let nativeClicked = false;
-    try {
-      nativeClicked = await clickFlowNativeDownload(mediaEl);
-    } catch (_) { nativeClicked = false; }
-
-    // Always try the URL-based copy when we have a URL — gives us the
-    // SN_flow_{random5}_{ddmmyyyy} filename in SN_Flow_Auto/.
     if (mediaUrl) {
       try {
         const dl = await sendDownloadToBackground(mediaUrl, filename);
@@ -183,14 +181,16 @@
           filename,
           url: mediaUrl,
           downloadId: dl && dl.id,
-          alsoNativeClicked: nativeClicked,
         };
-      } catch (e) {
-        if (nativeClicked) return { method: "click", filename, alsoNativeClicked: true, error: String(e && e.message || e) };
-        // fall through to legacy fallback
+      } catch (_) {
+        // fall through to native-click fallback
       }
     }
 
+    let nativeClicked = false;
+    try {
+      nativeClicked = await clickFlowNativeDownload(mediaEl);
+    } catch (_) { nativeClicked = false; }
     if (nativeClicked) return { method: "click", filename };
 
     const globalBtn = findGlobalDownloadButton();
@@ -203,6 +203,8 @@
     }
 
     if (!mediaUrl) throw new Error("no media URL and no download button found");
+    // Last-resort retry through the SW (in case the first attempt failed for
+    // a transient reason like the SW reloading mid-download).
     const dl = await sendDownloadToBackground(mediaUrl, filename);
     return { method: "url", filename, url: mediaUrl, downloadId: dl && dl.id };
   }
