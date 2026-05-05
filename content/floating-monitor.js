@@ -9,7 +9,7 @@
     pos: null, // { left, top }
   };
 
-  let fabEl, monitorEl;
+  let fabEl, monitorEl, confirmEl;
   let bodyEls = {}; // cached DOM refs
 
   function makeEl(tag, attrs = {}, children = []) {
@@ -35,7 +35,64 @@
       monitorEl = buildMonitor();
       document.body.appendChild(monitorEl);
     }
+    if (!confirmEl) {
+      confirmEl = buildConfirmDialog();
+      document.body.appendChild(confirmEl);
+    }
     return true;
+  }
+
+  // In-page <dialog> we use instead of native window.confirm(). MV3 popups
+  // (and some Chromium configurations like --enable-automation) suppress
+  // the native confirm modal, which silently returns false. Using
+  // HTMLDialogElement.showModal() keeps focus inside the page and works
+  // reliably regardless of the surrounding browser flags.
+  function buildConfirmDialog() {
+    const d = makeEl("dialog", { id: "snflow-confirm" });
+    const body = makeEl("div", { class: "snflow-confirm-body" });
+    const title = makeEl("h3", { class: "snflow-confirm-title", text: "Confirm" });
+    const msg = makeEl("p", { class: "snflow-confirm-message", text: "" });
+    body.appendChild(title);
+    body.appendChild(msg);
+    const actions = makeEl("div", { class: "snflow-confirm-actions" });
+    const cancel = makeEl("button", { type: "button", class: "snflow-btn", text: "Cancel" });
+    const ok = makeEl("button", { type: "button", class: "snflow-btn snflow-primary", text: "OK" });
+    actions.appendChild(cancel);
+    actions.appendChild(ok);
+    d.appendChild(body);
+    d.appendChild(actions);
+    d._snflow = { title, msg, cancel, ok };
+    return d;
+  }
+
+  // Promise-based confirm. Returns true on OK, false on Cancel / dismiss.
+  function snfConfirm(message, opts) {
+    if (!ensureInjected()) return Promise.resolve(false);
+    const o = opts || {};
+    const { title, msg, cancel, ok } = confirmEl._snflow;
+    title.textContent = o.title || "Confirm";
+    msg.textContent = String(message || "");
+    cancel.textContent = o.cancelText || "Cancel";
+    ok.textContent = o.okText || "OK";
+    return new Promise((resolve) => {
+      const cleanup = (v) => {
+        cancel.removeEventListener("click", onCancel);
+        ok.removeEventListener("click", onOk);
+        confirmEl.removeEventListener("close", onClose);
+        try { confirmEl.close(); } catch (_) {}
+        resolve(v);
+      };
+      const onCancel = () => cleanup(false);
+      const onOk = () => cleanup(true);
+      const onClose = () => cleanup(false);
+      cancel.addEventListener("click", onCancel);
+      ok.addEventListener("click", onOk);
+      confirmEl.addEventListener("close", onClose);
+      try { confirmEl.showModal(); } catch (_) {
+        // older browsers / dialog already open — fall back to non-modal show
+        try { confirmEl.show(); } catch (__) { resolve(false); }
+      }
+    });
   }
 
   function buildMonitor() {
@@ -86,14 +143,18 @@
     bodyEls.btnStop = makeEl("button", { class: "snflow-btn", text: "Stop" });
     bodyEls.btnPause.addEventListener("click", () => sendCmd("PAUSE"));
     bodyEls.btnResume.addEventListener("click", () => sendCmd("RESUME"));
-    bodyEls.btnStop.addEventListener("click", () => {
+    bodyEls.btnStop.addEventListener("click", async () => {
       // Stop halts and resets every queue item to Pending — confirm first.
       // Pause/Resume preserves state, so users who want that should use Pause.
-      const ok = window.confirm(
+      // We use an in-page <dialog> instead of window.confirm() because some
+      // Chromium configurations (e.g. --enable-automation) suppress the
+      // native confirm and silently return false, making Stop a no-op.
+      const ok = await snfConfirm(
         "Stop will halt all processing immediately and reset every queue item back to Pending.\n\n" +
         "Next Start will begin again from item 1.\n\n" +
         "(Pause/Resume preserves state — use Pause if you want to keep position.)\n\n" +
         "Continue?",
+        { title: "Stop & reset queue?", okText: "Stop & reset", cancelText: "Cancel" },
       );
       if (!ok) return;
       sendCmd("STOP");
