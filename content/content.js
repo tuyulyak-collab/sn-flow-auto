@@ -94,21 +94,34 @@
       }
     }
 
-    // 1) sending prompt
+    // 1) sending prompt — retry finding the prompt input up to 3 times
+    //    with increasing timeouts in case Flow's DOM is slow to mount.
     await reportStatus(item.id, "sending");
-    const promptEl = await Retry.waitFor(() => PromptInput.findPromptInput(), {
-      timeout: 12_000, interval: 350,
-    });
-    if (!promptEl) throw new Error("prompt input not found");
+    const promptEl = await Retry.retry(
+      async () => {
+        const el = await Retry.waitFor(() => PromptInput.findPromptInput(), {
+          timeout: 12_000, interval: 350,
+        });
+        if (!el) throw new Error("prompt input not found");
+        return el;
+      },
+      { attempts: 3, baseDelay: 1000, onAttempt: (n) => n > 1 && Log.warn("prompt input retry", { attempt: n }) },
+    );
     await PromptInput.setPromptText(promptEl, item.prompt);
     await Retry.sleep((settings && settings.promptInputDelayMs) || 250);
 
     // snapshot media URLs before generation
     const before = ResultWatcher.snapshot();
 
-    // 2) click generate
-    const clicked = await Generate.clickGenerate(promptEl);
-    if (!clicked) throw new Error("generate button not found");
+    // 2) click generate — retry up to 3 times if the button isn't found
+    const clicked = await Retry.retry(
+      async () => {
+        const ok = await Generate.clickGenerate(promptEl);
+        if (!ok) throw new Error("generate button not found");
+        return ok;
+      },
+      { attempts: 3, baseDelay: 1000, onAttempt: (n) => n > 1 && Log.warn("generate button retry", { attempt: n }) },
+    );
     await reportStatus(item.id, "generating");
 
     // 3) wait for new media. For outputCount > 1 we wait for the batch.
@@ -131,7 +144,7 @@
     }
     Log.log("media detected", { count: result.items.length, mode: result.mode });
 
-    // 4) download each item
+    // 4) download each item — retry each download up to 2 times on failure
     await reportStatus(item.id, "downloading");
     const downloads = [];
     for (let i = 0; i < result.items.length; i++) {
@@ -141,9 +154,12 @@
         media: { url: m.url, ext: Filename.extFor(m.url, result.mode === "video" ? "mp4" : "png") },
       });
       try {
-        const dl = await Downloader.downloadResult(m.element, m.url, filename);
+        const dl = await Retry.retry(
+          () => Downloader.downloadResult(m.element, m.url, filename),
+          { attempts: 2, baseDelay: 1500, onAttempt: (n) => n > 1 && Log.warn("download retry", { i, attempt: n }) },
+        );
         downloads.push({ ok: true, ...dl });
-        Log.log("download triggered", { i, ...dl });
+        Log.log("download triggered", { i, filename });
       } catch (e) {
         downloads.push({ ok: false, error: String((e && e.message) || e), filename });
         Log.error("download failed", { i, e: String((e && e.message) || e) });
@@ -196,7 +212,21 @@
     if (msg.type === "SN_FLOW_RUN_ITEM") {
       runItem(msg.payload || {})
         .then((res) => sendResponse({ ok: true, ...res }))
-        .catch((err) => sendResponse({ ok: false, error: String((err && err.message) || err) }));
+        .catch((err) => {
+          const raw = String((err && err.message) || err);
+          // Translate common DOM errors into readable messages
+          let friendly = raw;
+          if (/prompt input not found/i.test(raw)) {
+            friendly = "Could not find prompt input — Flow UI may have changed or not fully loaded.";
+          } else if (/generate button not found/i.test(raw)) {
+            friendly = "Could not find the Generate button — Flow UI may have changed.";
+          } else if (/timed out waiting for media/i.test(raw)) {
+            friendly = "Timed out waiting for result — Flow may be slow or the generation failed silently.";
+          } else if (/tab message timeout/i.test(raw)) {
+            friendly = "Lost connection to the Flow tab — it may have been closed or refreshed.";
+          }
+          sendResponse({ ok: false, error: friendly });
+        });
       return true; // async
     }
     return false;

@@ -1,8 +1,9 @@
 # SN Flow Auto
 
 Chrome Extension (Manifest V3) untuk **batch prompt automation** di
-[Google Flow](https://labs.google/flow/). Mendukung mode **Image** dan
-**Video**, dengan auto-download hasil dan filename yang konsisten:
+[Google Flow](https://labs.google/fx/tools/flow). Mendukung mode **Image**,
+**Video**, dan **Chain (Image → Video)**, dengan auto-download hasil dan
+filename yang konsisten:
 
 ```
 SN_flow_{random5}_{ddmmyyyy}.{ext}
@@ -19,7 +20,11 @@ e.g. SN_flow_A7K2Q_05052026.mp4
 
 - **Manifest V3** — service worker + content scripts.
 - **Manual prompt textarea** + **Import .txt** (1 baris = 1 prompt).
-- **Mode selector**: `IMAGE` / `VIDEO` (per batch).
+- **Mode selector**: `IMAGE` / `VIDEO` / `CHAIN (Image → Video)` (per batch).
+- **Chain mode**: generate image first, then auto-feed it to Veo for video gen.
+  Configurable strategy (first image only / all variants), video prompt source
+  (same / suffix / custom template with `{prompt}` placeholder), run order
+  (interleave / batch), and video model picker (Auto / Veo / Veo 2).
 - **Aspect ratio**: `16:9 / 4:3 / 1:1 / 3:4 / 9:16` (per batch).
 - **Output count**: `x1 / x2 / x3 / x4` (per batch — Flow generates N tiles per
   prompt, semua tiles auto-download).
@@ -59,7 +64,7 @@ e.g. SN_flow_A7K2Q_05052026.mp4
 
 1. Buka https://labs.google/flow/ dan login (kalau belum).
 2. Klik ikon SN Flow Auto di toolbar Chrome → popup terbuka.
-3. Pilih mode **Image** atau **Video**.
+3. Pilih mode **Image**, **Video**, atau **Chain (Image → Video)**.
 4. Tulis 1 prompt per baris di textarea, atau klik **Import .txt**.
 5. Klik **Add to Queue** → semua prompt masuk antrian dengan status `pending`.
 6. Klik **Start**.
@@ -67,6 +72,40 @@ e.g. SN_flow_A7K2Q_05052026.mp4
    (klik tombol bulat `SN` di pojok kanan bawah).
 8. Hasil otomatis tersimpan ke folder `Downloads/SN_Flow_Auto/` dengan nama
    `SN_flow_{random5}_{ddmmyyyy}.{ext}`.
+
+### Manual Prompts
+
+Ketik 1 prompt per baris di textarea popup. Baris kosong akan diabaikan.
+
+### Import TXT
+
+Klik **Import .txt** dan pilih file `.txt` — setiap baris non-kosong menjadi
+1 item di queue. Mendukung file besar (ratusan prompt).
+
+### Image Mode
+
+Generate gambar dari setiap prompt. Aspect ratio dan output count diatur
+di popup (x1–x4). Semua tile hasil auto-download.
+
+### Video Mode
+
+Generate video (Veo) dari setiap prompt. Timeout per item 5 menit
+(configurable). Flow mungkin generate 1 tile saja walau setting x2/x3/x4.
+
+### Chain (Image → Video) Mode
+
+Untuk setiap prompt, extension akan:
+1. Generate **image** dulu (pakai model Flow yang aktif / Nano Banana).
+2. Attach image sebagai input ke **video step** (Veo).
+3. Generate video dari image + prompt.
+
+Configurasi chain di popup:
+- **Image → Video**: *Use first image only* vs *Chain every image variant*
+- **Video prompt**: *Same as image prompt*, *+ suffix*, atau *Custom template*
+  (pakai `{prompt}` placeholder)
+- **Run order**: *Per prompt* (image1→video1→image2→…) vs *Batch*
+  (semua image dulu, baru semua video)
+- **Video model**: Auto / Veo / Veo 2
 
 ---
 
@@ -136,6 +175,59 @@ monitor read it via `chrome.storage.onChanged`.
 
 ---
 
+## Failure Recovery
+
+- **Prompt input not found**: retries up to 3x with exponential backoff before
+  marking the item failed.
+- **Generate button not found**: retries up to 3x.
+- **Result detection timeout**: only the current item fails, not the whole
+  queue. Other pending items continue.
+- **Download failed**: retries download up to 2x per tile.
+- **Flow UI changed**: readable error messages ("Could not find prompt
+  input — Flow UI may have changed or not fully loaded").
+- **Failed items**: retryable via per-row ⟳ button or bulk **Retry Failed**.
+
+## Queue Persistence
+
+- Queue stored in `chrome.storage.local` — persists when popup closes.
+- Floating monitor reads from storage via `chrome.storage.onChanged`.
+- If browser/extension reloads, in-flight items revert to `Pending` (not stuck
+  `Running`). Run state resets to `Idle`.
+- Tab close / navigate away: in-flight item reverts to `Pending`, queue pauses.
+
+---
+
+## Known Limitations
+
+1. **No official Flow API** — all automation via DOM interaction. Flow UI
+   updates may break selectors; heuristic fallbacks mitigate this.
+2. **Rate limiting** — Flow rate-limits aggressive automation. Default pacing
+   (30–60s between prompts) helps. Aggressive mode (0 delay) is for testing
+   only.
+3. **Video gen is slow** — Veo takes 1–3 minutes per prompt. Chain mode video
+   steps have an 8-minute timeout.
+4. **Filename random5** uses a 30-character alphabet (A–Z + 2–9, excluding
+   ambiguous 0/O/1/I) for readability. Still 5 chars, ~24.3M combinations.
+5. **Single tab** — extension operates on 1 Flow tab at a time.
+6. **No batch progress from Flow** — if output count x4 but Flow only
+   generates 2 tiles (e.g. video mode), extension downloads what's available.
+
+---
+
+## Troubleshooting
+
+| Problem | Fix |
+| --- | --- |
+| "Open https://labs.google/flow first" | Open a Flow tab and make sure you're logged in. |
+| Prompt input not found | Refresh the Flow tab. Make sure you're on a project page (not the landing page). |
+| Generate button not found | Check if Flow's UI changed. Try refreshing. |
+| Download folder empty | Check `Downloads/SN_Flow_Auto/`. Chrome may block downloads — check `chrome://downloads`. |
+| Queue stuck on Running | Close popup, reopen. If stuck, go to `chrome://extensions` → reload the extension. |
+| Rate limit / blocked | Increase min/max delay in Pacing settings. Enable "Pause on rate limit". |
+| Chain video has no input image | Make sure the parent image completed successfully. Check that `flow-add-media.js` is loaded (visible in content scripts). |
+
+---
+
 ## Catatan Teknis — DOM Contract Google Flow
 
 DOM contract yang sudah diobservasi langsung di
@@ -162,6 +254,20 @@ Semua content script jalan di `document_idle` di
 `labs.google/* | flow.google/* | aitestkitchen.withgoogle.com/*` dan walk
 open Shadow DOM via `SNFlowDom.queryAllDeep` (lihat
 `content/flow-detector.js`).
+
+---
+
+## Arsitektur Tambahan (Phase B: Chain Mode)
+
+```
+content/flow-add-media.js   — attach image to Flow (4-strategy fallback:
+                               fileInput → addMediaClick → paste → drop)
+content/flow-settings.js    — applyModel() for Veo/Veo-2 picker
+background/service-worker.js — SN_FLOW_FETCH_BLOB CORS fallback for image fetch
+core/pacing.js              — adaptive anti-bot delay + cooldown
+background/network-sniffer.js — webRequest-based rate-limit detection
+content/dom-error-watcher.js  — DOM-based rate-limit toast detection
+```
 
 ---
 

@@ -176,17 +176,26 @@
     if (runState && runState.running) status = runState.paused ? "paused" : "running";
 
     bodyEls.pill.textContent = status;
-    bodyEls.status.textContent = status + (currentItem ? ` · ${currentItem.status}` : "");
     bodyEls.progress.textContent = `${done} / ${total}`;
     bodyEls.barFill.style.width = pct + "%";
     if (currentItem) {
+      bodyEls.status.textContent = status + ` · ${currentItem.status}`;
       const ratio = currentItem.aspectRatio ? ` · ${currentItem.aspectRatio}` : "";
       const cnt = currentItem.outputCount && currentItem.outputCount > 1 ? ` · x${currentItem.outputCount}` : "";
       bodyEls.current.textContent = `${currentItem.mode || "?"}${ratio}${cnt} · #${(queue || []).indexOf(currentItem) + 1}`;
+      bodyEls.prompt.textContent = trim(currentItem.prompt, 240);
+    } else if (total > 0 && done === total) {
+      // Run finished summary
+      const c = sum.counts || {};
+      const allOk = c.completed === total;
+      bodyEls.status.textContent = allOk ? "done" : `done · ${c.completed || 0} ok, ${c.failed || 0} failed`;
+      bodyEls.current.textContent = allOk ? "All items completed" : `${c.failed || 0} failed — use Retry`;
+      bodyEls.prompt.textContent = "—";
     } else {
+      bodyEls.status.textContent = status;
       bodyEls.current.textContent = "—";
+      bodyEls.prompt.textContent = total === 0 ? "No prompts queued" : "—";
     }
-    bodyEls.prompt.textContent = currentItem ? trim(currentItem.prompt, 240) : "—";
     if (lastLog) bodyEls.log.textContent = lastLog;
 
     bodyEls.btnPause.disabled = !(runState && runState.running) || (runState && runState.paused);
