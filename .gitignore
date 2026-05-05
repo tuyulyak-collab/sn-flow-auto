@@ -1,0 +1,21 @@
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# node-style buildup (unused, but defensive)
+node_modules/
+dist/
+build/
+*.log
+
+# python
+__pycache__/
+*.pyc
+
+# secrets
+.env
+*.env.local
