@@ -36,9 +36,25 @@
     outputCount: 1,        // 1..4 — Flow's "x1" / "x2" / "x3" / "x4" tabs
     autoStart: false,
     waitTimeoutMs: 5 * 60 * 1000, // 5 min per prompt for video
-    perItemDelayMs: 1500,
+    perItemDelayMs: 1500,           // legacy minimum baseline (kept for back-compat)
     maxAttempts: 3,
     promptInputDelayMs: 250,
+    // ---- anti-bot pacing ----
+    // Flow rate-limits aggressive automation. These settings drive the
+    // pacer in core/pacing.js. The defaults aim to look like a focused
+    // human (≈30–60 s between prompts) with periodic longer breaks.
+    minDelayMs: 30_000,
+    maxDelayMs: 60_000,
+    jitterMs: 4_000,
+    cooldownEvery: 5,           // every N prompts, take a longer pause
+    cooldownMs: 180_000,        // 3 min cooldown
+    adaptiveBackoff: true,
+    backoffMultiplier: 2,
+    backoffMaxMs: 15 * 60_000,
+    backoffFloorMs: 90_000,
+    aggressiveMode: false,      // dangerous: collapses all delays to 0
+    pauseOnRateLimit: true,     // pause queue after 3 consecutive blocks
+    rateLimitPauseAfterStreak: 3,
   };
 
   function get(keys) {

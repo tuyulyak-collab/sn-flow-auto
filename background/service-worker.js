@@ -15,6 +15,8 @@ self.importScripts(
   "../core/storage.js",
   "../core/queue-manager.js",
   "../core/prompt-parser.js",
+  "../core/pacing.js",
+  "./network-sniffer.js",
 );
 
 const Log = self.SNFlowLogger;
@@ -22,9 +24,55 @@ const Retry = self.SNFlowRetry;
 const Storage = self.SNFlowStorage;
 const Queue = self.SNFlowQueue;
 const Filename = self.SNFlowFilename;
+const Pacing = self.SNFlowPacing;
+const Sniffer = self.SNFlowSniffer;
 
-// in-memory loop guard (per worker lifetime)
+// in-memory loop guard (per worker lifetime) and shared pacer
 let loopRunning = false;
+let pacer = null; // lazily created from current settings
+let lastFlowTabId = null; // last known tab the run loop talked to
+
+async function getOrMakePacer() {
+  const settings = await Storage.getSettings();
+  if (!pacer) {
+    pacer = Pacing.makePacer(settings);
+  } else {
+    pacer.updateSettings(settings);
+  }
+  return pacer;
+}
+
+// Wire the network sniffer once per service-worker lifetime. The listener
+// stays subscribed across run/stop cycles — the run loop reads the pacer
+// state lazily, so signals always have an effect regardless of timing.
+Sniffer.start();
+Sniffer.onSignal(async (sig) => {
+  try {
+    if (sig.kind === "rate-limit") {
+      Log.warn("network rate-limit signal", { status: sig.status, url: sig.url });
+      const p = await getOrMakePacer();
+      p.onRateLimited(sig.reason || `HTTP ${sig.status}`);
+      await maybePauseOnStreak(p);
+    } else if (sig.kind === "auth-lost") {
+      Log.warn("auth-lost signal", { status: sig.status });
+      // do nothing automatic — let the user re-login. We surface a status.
+      await Storage.setRunState({ paused: true });
+    }
+  } catch (e) {
+    Log.error("sniffer handler error", String(e && e.message || e));
+  }
+});
+
+async function maybePauseOnStreak(p) {
+  const settings = await Storage.getSettings();
+  if (!settings.pauseOnRateLimit) return;
+  const limit = settings.rateLimitPauseAfterStreak || 3;
+  const st = p.getState();
+  if (st.errorStreak >= limit) {
+    Log.warn("pausing queue after rate-limit streak", st.errorStreak);
+    await Storage.setRunState({ paused: true });
+  }
+}
 
 const FLOW_URL_MATCH = /(^|\.)(labs\.google|flow\.google|aitestkitchen\.withgoogle\.com)/i;
 
@@ -72,12 +120,14 @@ async function ensureContentInjected(tabId) {
         "core/logger.js",
         "core/retry.js",
         "core/filename-template.js",
+        "core/pacing.js",
         "content/flow-detector.js",
         "content/flow-settings.js",
         "content/prompt-input.js",
         "content/generate-button.js",
         "content/result-watcher.js",
         "content/downloader.js",
+        "content/dom-error-watcher.js",
         "content/floating-monitor.js",
         "content/content.js",
       ],
@@ -121,6 +171,7 @@ async function runLoop() {
         await Storage.setRunState({ running: false, paused: false, currentId: null });
         break;
       }
+      lastFlowTabId = tab.id;
 
       const ready = await ensureContentInjected(tab.id);
       if (!ready) {
@@ -130,6 +181,8 @@ async function runLoop() {
         break;
       }
 
+      const p = await getOrMakePacer();
+      let succeeded = false;
       try {
         const resp = await sendToTab(tab.id, {
           type: "SN_FLOW_RUN_ITEM",
@@ -143,12 +196,18 @@ async function runLoop() {
             filename: resp.filename,
             mediaUrl: resp.mediaUrl,
           });
-          Log.log("item completed", { id: next.id, filename: resp.filename });
+          p.onItemCompleted();
+          succeeded = true;
+          Log.log("item completed", { id: next.id, filename: resp.filename, pacer: p.getState() });
         } else {
           const errMsg = (resp && resp.error) || "unknown error";
+          // Treat heuristic rate-limit-y errors from content as a sniff signal too.
+          if (Pacing.isRateLimitMessage(errMsg)) {
+            p.onRateLimited(errMsg);
+            await maybePauseOnStreak(p);
+          }
           const attempts = (next.attempts || 0) + 1;
           if (attempts < (settings.maxAttempts || 3)) {
-            // requeue as pending (do not increment again — we'll bump on next pick)
             await Storage.updateItem(next.id, { status: "pending", error: errMsg });
             Log.warn("item retrying", { id: next.id, attempts, errMsg });
           } else {
@@ -158,6 +217,10 @@ async function runLoop() {
         }
       } catch (e) {
         const errMsg = String((e && e.message) || e);
+        if (Pacing.isRateLimitMessage(errMsg)) {
+          p.onRateLimited(errMsg);
+          await maybePauseOnStreak(p);
+        }
         const attempts = (next.attempts || 0) + 1;
         if (attempts < (settings.maxAttempts || 3)) {
           await Storage.updateItem(next.id, { status: "pending", error: errMsg });
@@ -168,10 +231,37 @@ async function runLoop() {
       }
 
       await Storage.setRunState({ currentId: null });
-      await Retry.sleep((settings.perItemDelayMs || 1500));
+
+      // Pacing — replace the old fixed perItemDelayMs with adaptive delay.
+      // We still respect pause/stop while sleeping by polling.
+      const delayMs = p.nextDelayMs();
+      Log.log("pacing next", {
+        delayMs,
+        succeeded,
+        state: p.getState(),
+      });
+      await sleepWithControl(delayMs);
     }
   } finally {
     loopRunning = false;
+  }
+}
+
+// sleepWithControl: like Retry.sleep but exits early if running flips off.
+// Polls every 500 ms so Stop / Pause feel snappy regardless of delay length.
+async function sleepWithControl(totalMs) {
+  if (!totalMs || totalMs <= 0) return;
+  const start = Date.now();
+  const STEP = 500;
+  while (Date.now() - start < totalMs) {
+    const run = await Storage.getRunState();
+    if (!run.running) return;
+    if (run.paused) {
+      await Retry.sleep(STEP);
+      continue;
+    }
+    const remaining = totalMs - (Date.now() - start);
+    await Retry.sleep(Math.min(STEP, Math.max(0, remaining)));
   }
 }
 
@@ -208,6 +298,8 @@ async function stopQueue() {
   const queue = await Storage.getQueue();
   await Storage.setQueue(Queue.resetActive(queue));
   await Storage.setRunState({ running: false, paused: false, currentId: null });
+  // Reset pacer too — fresh streak/cooldown on next Start
+  if (pacer) pacer.reset();
   return { ok: true };
 }
 
@@ -259,6 +351,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
 
+  if (msg.type === "SN_FLOW_RATE_LIMIT") {
+    // From content/dom-error-watcher.js — Flow showed a rate-limit toast.
+    const reason = (msg.payload && msg.payload.reason) || "rate-limit toast";
+    Log.warn("DOM rate-limit signal", { reason });
+    getOrMakePacer().then((p) => {
+      p.onRateLimited(reason);
+      return maybePauseOnStreak(p);
+    }).catch(() => {});
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  if (msg.type === "SN_FLOW_PACING") {
+    // popup/floating-monitor: read pacer state for live UI
+    getOrMakePacer().then((p) => {
+      sendResponse({ ok: true, state: p.getState() });
+    }).catch((e) => sendResponse({ ok: false, error: String(e && e.message || e) }));
+    return true;
+  }
+
   if (msg.type === "SN_FLOW_CMD") {
     const cmd = (msg.payload && msg.payload.cmd) || "";
     let p;
@@ -298,4 +410,41 @@ chrome.runtime.onStartup && chrome.runtime.onStartup.addListener(async () => {
   const queue = await Storage.getQueue();
   await Storage.setQueue(Queue.resetActive(queue));
   await Storage.setRunState({ running: false, paused: false, currentId: null });
+});
+
+// ---------------- tab lifecycle: stop run cleanly when Flow tab vanishes ----------------
+//
+// If the user closes the Flow tab or navigates it to a non-Flow URL while a
+// run is in progress, the content script disappears and chrome.tabs.sendMessage
+// hangs / errors. We watch tabs.onRemoved and tabs.onUpdated to:
+//   - mark the in-flight item back to pending (so Retry Failed picks it up)
+//   - pause the run with a clear error state so the popup tells the user
+chrome.tabs && chrome.tabs.onRemoved && chrome.tabs.onRemoved.addListener(async (tabId) => {
+  if (lastFlowTabId !== tabId) return;
+  Log.warn("Flow tab closed mid-run", { tabId });
+  const run = await Storage.getRunState();
+  if (run && run.running) {
+    if (run.currentId) {
+      await Storage.updateItem(run.currentId, { status: "pending", error: "Flow tab closed" });
+    }
+    await Storage.setRunState({ running: false, paused: false, currentId: null });
+  }
+  lastFlowTabId = null;
+});
+
+chrome.tabs && chrome.tabs.onUpdated && chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  if (lastFlowTabId !== tabId) return;
+  if (!tab || !tab.url) return;
+  let stillFlow = false;
+  try { stillFlow = FLOW_URL_MATCH.test(new URL(tab.url).hostname); } catch (_) {}
+  if (stillFlow) return;
+  Log.warn("Flow tab navigated away mid-run", { tabId, url: tab.url });
+  const run = await Storage.getRunState();
+  if (run && run.running) {
+    if (run.currentId) {
+      await Storage.updateItem(run.currentId, { status: "pending", error: "Flow tab navigated away" });
+    }
+    await Storage.setRunState({ running: false, paused: false, currentId: null });
+  }
+  lastFlowTabId = null;
 });

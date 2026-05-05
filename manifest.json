@@ -25,7 +25,9 @@
     "unlimitedStorage",
     "downloads",
     "activeTab",
-    "scripting"
+    "scripting",
+    "tabs",
+    "webRequest"
   ],
   "host_permissions": [
     "https://labs.google/*",
@@ -47,12 +49,14 @@
         "core/logger.js",
         "core/retry.js",
         "core/filename-template.js",
+        "core/pacing.js",
         "content/flow-detector.js",
         "content/flow-settings.js",
         "content/prompt-input.js",
         "content/generate-button.js",
         "content/result-watcher.js",
         "content/downloader.js",
+        "content/dom-error-watcher.js",
         "content/floating-monitor.js",
         "content/content.js"
       ],

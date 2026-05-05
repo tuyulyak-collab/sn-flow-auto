@@ -129,7 +129,50 @@
     if (els.count && settings.outputCount && els.count.value !== String(settings.outputCount)) {
       els.count.value = String(settings.outputCount);
     }
+    syncPacingInputs(settings);
     renderLogs(all[Storage.KEYS.LOGS] || []);
+    refreshPacerState();
+  }
+
+  function syncPacingInputs(settings) {
+    if (els.minDelay && els.minDelay.value !== String(Math.round(settings.minDelayMs / 1000))) {
+      els.minDelay.value = String(Math.round(settings.minDelayMs / 1000));
+    }
+    if (els.maxDelay && els.maxDelay.value !== String(Math.round(settings.maxDelayMs / 1000))) {
+      els.maxDelay.value = String(Math.round(settings.maxDelayMs / 1000));
+    }
+    if (els.cooldownEvery && els.cooldownEvery.value !== String(settings.cooldownEvery)) {
+      els.cooldownEvery.value = String(settings.cooldownEvery);
+    }
+    if (els.cooldownMs && els.cooldownMs.value !== String(Math.round(settings.cooldownMs / 1000))) {
+      els.cooldownMs.value = String(Math.round(settings.cooldownMs / 1000));
+    }
+    if (els.adaptive) els.adaptive.checked = !!settings.adaptiveBackoff;
+    if (els.pauseRl) els.pauseRl.checked = !!settings.pauseOnRateLimit;
+    if (els.aggressive) els.aggressive.checked = !!settings.aggressiveMode;
+  }
+
+  function refreshPacerState() {
+    if (!els.pacerMeta) return;
+    try {
+      chrome.runtime.sendMessage({ type: "SN_FLOW_PACING" }, (resp) => {
+        if (!resp || !resp.ok) {
+          els.pacerMeta.textContent = "—";
+          return;
+        }
+        const st = resp.state || {};
+        const parts = [];
+        parts.push(`${st.total || 0} done`);
+        if (st.errorStreak) parts.push(`${st.errorStreak} consecutive blocks`);
+        if (st.lastReason) parts.push(`last: ${trim(st.lastReason, 40)}`);
+        els.pacerMeta.textContent = parts.join(" · ");
+        if (st.errorStreak && st.errorStreak > 0) {
+          els.pacerMeta.style.color = "#b6322f";
+        } else {
+          els.pacerMeta.style.color = "";
+        }
+      });
+    } catch (_) { els.pacerMeta.textContent = "—"; }
   }
 
   function currentBuildOpts() {
@@ -230,6 +273,40 @@
       });
     }
 
+    // ---- pacing settings ----
+    const savePacing = async () => {
+      const min = Math.max(0, parseInt(els.minDelay.value, 10) || 0) * 1000;
+      const max = Math.max(min, parseInt(els.maxDelay.value, 10) || 0) * 1000;
+      await Storage.setSettings({
+        minDelayMs: min,
+        maxDelayMs: max,
+        cooldownEvery: Math.max(0, parseInt(els.cooldownEvery.value, 10) || 0),
+        cooldownMs: Math.max(0, parseInt(els.cooldownMs.value, 10) || 0) * 1000,
+        adaptiveBackoff: !!els.adaptive.checked,
+        pauseOnRateLimit: !!els.pauseRl.checked,
+        aggressiveMode: !!els.aggressive.checked,
+      });
+    };
+    if (els.minDelay) els.minDelay.addEventListener("change", savePacing);
+    if (els.maxDelay) els.maxDelay.addEventListener("change", savePacing);
+    if (els.cooldownEvery) els.cooldownEvery.addEventListener("change", savePacing);
+    if (els.cooldownMs) els.cooldownMs.addEventListener("change", savePacing);
+    if (els.adaptive) els.adaptive.addEventListener("change", savePacing);
+    if (els.pauseRl) els.pauseRl.addEventListener("change", savePacing);
+    if (els.aggressive) {
+      els.aggressive.addEventListener("change", async () => {
+        if (els.aggressive.checked && !confirm(
+          "Aggressive mode collapses ALL delays to 0.\n\n" +
+          "Flow may rate-limit or temporarily block this account if it detects automation.\n\n" +
+          "Use only for testing. Continue?"
+        )) {
+          els.aggressive.checked = false;
+          return;
+        }
+        await savePacing();
+      });
+    }
+
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local") return;
       if (changes[Storage.KEYS.QUEUE] || changes[Storage.KEYS.RUN] || changes[Storage.KEYS.LOGS] || changes[Storage.KEYS.SETTINGS]) {
@@ -261,9 +338,20 @@
       queueCount: $("snf-queue-count"),
       log: $("snf-log"),
       logClear: $("snf-log-clear"),
+      // pacing
+      minDelay: $("snf-min-delay"),
+      maxDelay: $("snf-max-delay"),
+      cooldownEvery: $("snf-cooldown-every"),
+      cooldownMs: $("snf-cooldown-ms"),
+      adaptive: $("snf-adaptive"),
+      pauseRl: $("snf-pause-rl"),
+      aggressive: $("snf-aggressive"),
+      pacerMeta: $("snf-pacer-meta"),
     });
     bind();
     refresh();
+    // Refresh pacer state every 3 s while popup is open
+    setInterval(refreshPacerState, 3000);
   }
 
   if (document.readyState === "loading") {
