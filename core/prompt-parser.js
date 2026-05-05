@@ -25,23 +25,86 @@
     return "id-" + Math.random().toString(36).slice(2, 10) + "-" + Date.now().toString(36);
   }
 
+  // Build the prompt that the chained video step should send to Flow.
+  // Default ("same") reuses the image prompt verbatim. "suffix" appends a
+  // small steering phrase. "custom" is reserved for PR #8 and currently
+  // behaves like "same".
+  function buildVideoPrompt(imagePrompt, opts) {
+    const source = (opts && opts.chainPromptSource) || "same";
+    const suffix = (opts && opts.chainPromptSuffix) || "";
+    if (source === "suffix" && suffix) {
+      const sep = /[.!?]$/.test(imagePrompt.trim()) ? " " : ", ";
+      return imagePrompt + sep + suffix;
+    }
+    return imagePrompt;
+  }
+
   function buildItems(prompts, opts) {
     const now = Date.now();
     // Backward-compat: buildItems(prompts, "image"|"video") — promote to opts
     if (typeof opts === "string") opts = { mode: opts };
     const o = opts || {};
-    return prompts.map((p) => ({
-      id: uuid(),
-      prompt: p,
-      mode: o.mode || "image",
-      aspectRatio: o.aspectRatio || "16:9",
-      outputCount: parseInt(o.outputCount, 10) || 1,
-      status: "pending",
-      attempts: 0,
-      createdAt: now,
-      updatedAt: now,
-    }));
+    const mode = o.mode || "image";
+
+    if (mode !== "chain") {
+      // Plain image / video mode — one item per prompt, unchanged.
+      return prompts.map((p) => ({
+        id: uuid(),
+        prompt: p,
+        mode,
+        aspectRatio: o.aspectRatio || "16:9",
+        outputCount: parseInt(o.outputCount, 10) || 1,
+        status: "pending",
+        attempts: 0,
+        createdAt: now,
+        updatedAt: now,
+      }));
+    }
+
+    // ---- Chain mode: 1 prompt → image step + N video steps ----
+    // chainStrategy === "all" produces one video step per image variant
+    // (so x2 images = 2 videos per prompt). Default "first" produces a
+    // single video step that consumes the first image variant only.
+    const strategy = o.chainStrategy || "first";
+    const imageOutputCount = parseInt(o.outputCount, 10) || 1;
+    const videoCount = strategy === "all" ? imageOutputCount : 1;
+    const videoAspectRatio = o.chainVideoAspectRatio || o.aspectRatio || "16:9";
+
+    const out = [];
+    for (const p of prompts) {
+      const imageId = uuid();
+      out.push({
+        id: imageId,
+        prompt: p,
+        mode: "image",
+        chainStep: "image",
+        aspectRatio: o.aspectRatio || "16:9",
+        outputCount: imageOutputCount,
+        status: "pending",
+        attempts: 0,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const videoPrompt = buildVideoPrompt(p, o);
+      for (let i = 0; i < videoCount; i++) {
+        out.push({
+          id: uuid(),
+          prompt: videoPrompt,
+          mode: "video",
+          chainStep: "video",
+          parentId: imageId,
+          chainVariantIndex: i,
+          aspectRatio: videoAspectRatio,
+          outputCount: 1,
+          status: "pending",
+          attempts: 0,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+    }
+    return out;
   }
 
-  root.SNFlowPromptParser = { parsePrompts, buildItems, uuid };
+  root.SNFlowPromptParser = { parsePrompts, buildItems, buildVideoPrompt, uuid };
 })(typeof self !== "undefined" ? self : this);

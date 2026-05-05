@@ -20,6 +20,13 @@
  *     mediaUrl?: string,
  *     createdAt: number,
  *     updatedAt: number,
+ *
+ *     // Chain-mode (Image → Video) linkage. Set when an item was created
+ *     // from a "chain" prompt — one user-typed prompt expands into one
+ *     // image step + one video step that depends on the image's mediaUrl.
+ *     chainStep?: "image" | "video",
+ *     parentId?: string,         // present on chainStep="video" items
+ *     inputMediaUrl?: string,    // populated by run loop just before dispatch
  *   }
  */
 (function (root) {
@@ -55,6 +62,42 @@
     aggressiveMode: false,      // dangerous: collapses all delays to 0
     pauseOnRateLimit: true,     // pause queue after 3 consecutive blocks
     rateLimitPauseAfterStreak: 3,
+
+    // ---- Chain (Image → Video) mode ----
+    // When mode === "chain", each user-typed prompt is expanded into
+    // two queue items: an image step and a video step that depends on
+    // the image's mediaUrl. These three settings control how the chain
+    // behaves; all three are exposed as dropdowns in the popup.
+    //
+    // chainStrategy
+    //   "first"  — chain only the FIRST image variant into a single video
+    //              (1 prompt → 1 image batch + 1 video). Default.
+    //   "all"    — chain EVERY image variant (1 prompt → x2 images + 2 videos).
+    chainStrategy: "first",
+    // chainPromptSource
+    //   "same"   — video step reuses the image prompt verbatim. Default.
+    //   "suffix" — append a fixed suffix to the prompt for the video step
+    //              (uses chainPromptSuffix below).
+    //   "custom" — user supplies a fully separate prompt per chain (UI for
+    //              this is added in PR #8; treated as "same" for now).
+    chainPromptSource: "same",
+    chainPromptSuffix: "",
+    // chainRunOrder
+    //   "interleave" — image1 → video1 → image2 → video2 (default; finish
+    //                  each prompt's chain before starting the next).
+    //   "batch"      — image1 → image2 → ... → video1 → video2 (do all
+    //                  images first, then all videos).
+    chainRunOrder: "interleave",
+    // chainVideoModel — best-effort model to select for the video step.
+    // "auto" leaves whatever Flow currently has selected when the video
+    // step starts. PR #7 adds explicit model-picker support (Veo, Veo-2).
+    chainVideoModel: "auto",
+    // chainVideoAspectRatio — let video step have its own ratio (e.g. image
+    // 16:9 + video 9:16). null = follow image aspect ratio.
+    chainVideoAspectRatio: null,
+    // chainVideoTimeoutMs — video gen takes much longer than image; bump
+    // the per-item wait timeout for chained video items only.
+    chainVideoTimeoutMs: 8 * 60 * 1000, // 8 min
   };
 
   function get(keys) {

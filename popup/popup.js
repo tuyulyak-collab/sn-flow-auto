@@ -26,6 +26,7 @@
     els.queueBody.innerHTML = "";
     queue.forEach((item, idx) => {
       const tr = document.createElement("tr");
+      if (item.chainStep === "video") tr.classList.add("snf-chain-row");
 
       const tdIdx = document.createElement("td");
       tdIdx.textContent = String(idx + 1);
@@ -33,12 +34,21 @@
       const tdPrompt = document.createElement("td");
       tdPrompt.className = "snf-prompt-cell";
       tdPrompt.title = item.prompt;
-      tdPrompt.textContent = trim(item.prompt, 80);
+      if (item.chainStep === "video") {
+        const arrow = document.createElement("span");
+        arrow.className = "snf-chain-arrow";
+        arrow.textContent = "↳";
+        tdPrompt.appendChild(arrow);
+        tdPrompt.appendChild(document.createTextNode(trim(item.prompt, 80)));
+      } else {
+        tdPrompt.textContent = trim(item.prompt, 80);
+      }
 
       const tdMode = document.createElement("td");
       const ratio = item.aspectRatio ? ` · ${item.aspectRatio}` : "";
       const count = item.outputCount && item.outputCount > 1 ? ` · x${item.outputCount}` : "";
-      tdMode.textContent = `${item.mode || "image"}${ratio}${count}`;
+      const chainTag = item.chainStep ? ` · chain` : "";
+      tdMode.textContent = `${item.mode || "image"}${ratio}${count}${chainTag}`;
 
       const tdStatus = document.createElement("td");
       tdStatus.appendChild(statusTag(item.status));
@@ -129,9 +139,39 @@
     if (els.count && settings.outputCount && els.count.value !== String(settings.outputCount)) {
       els.count.value = String(settings.outputCount);
     }
+    syncChainInputs(settings);
     syncPacingInputs(settings);
     renderLogs(all[Storage.KEYS.LOGS] || []);
     refreshPacerState();
+  }
+
+  function syncChainInputs(settings) {
+    if (els.chainPanel) {
+      const isChain = (settings.mode || "image") === "chain";
+      els.chainPanel.hidden = !isChain;
+    }
+    if (els.chainStrategy && settings.chainStrategy && els.chainStrategy.value !== settings.chainStrategy) {
+      els.chainStrategy.value = settings.chainStrategy;
+    }
+    if (els.chainPromptSource && settings.chainPromptSource && els.chainPromptSource.value !== settings.chainPromptSource) {
+      els.chainPromptSource.value = settings.chainPromptSource;
+    }
+    if (els.chainRunOrder && settings.chainRunOrder && els.chainRunOrder.value !== settings.chainRunOrder) {
+      els.chainRunOrder.value = settings.chainRunOrder;
+    }
+    if (els.chainVideoAspect) {
+      const v = settings.chainVideoAspectRatio || "";
+      if (els.chainVideoAspect.value !== v) els.chainVideoAspect.value = v;
+    }
+    if (els.chainVideoModel && settings.chainVideoModel && els.chainVideoModel.value !== settings.chainVideoModel) {
+      els.chainVideoModel.value = settings.chainVideoModel;
+    }
+    if (els.chainSuffix && typeof settings.chainPromptSuffix === "string" && els.chainSuffix.value !== settings.chainPromptSuffix) {
+      els.chainSuffix.value = settings.chainPromptSuffix;
+    }
+    if (els.chainSuffixRow) {
+      els.chainSuffixRow.hidden = !((settings.chainPromptSource || "same") === "suffix");
+    }
   }
 
   function syncPacingInputs(settings) {
@@ -180,6 +220,15 @@
       mode: els.mode.value,
       aspectRatio: els.aspect ? els.aspect.value : "16:9",
       outputCount: els.count ? parseInt(els.count.value, 10) || 1 : 1,
+      // Chain fields are only meaningful when mode === "chain", but we
+      // include them unconditionally so downstream code (buildItems) can
+      // make consistent decisions without re-reading settings.
+      chainStrategy: els.chainStrategy ? els.chainStrategy.value : "first",
+      chainPromptSource: els.chainPromptSource ? els.chainPromptSource.value : "same",
+      chainPromptSuffix: els.chainSuffix ? els.chainSuffix.value : "",
+      chainRunOrder: els.chainRunOrder ? els.chainRunOrder.value : "interleave",
+      chainVideoAspectRatio: els.chainVideoAspect && els.chainVideoAspect.value ? els.chainVideoAspect.value : null,
+      chainVideoModel: els.chainVideoModel ? els.chainVideoModel.value : "auto",
     };
   }
 
@@ -338,7 +387,9 @@
       els.file.value = "";
     });
     els.mode.addEventListener("change", async () => {
-      await Storage.setSettings({ mode: els.mode.value });
+      const mode = els.mode.value;
+      if (els.chainPanel) els.chainPanel.hidden = mode !== "chain";
+      await Storage.setSettings({ mode });
     });
     if (els.aspect) {
       els.aspect.addEventListener("change", async () => {
@@ -349,6 +400,31 @@
       els.count.addEventListener("change", async () => {
         await Storage.setSettings({ outputCount: parseInt(els.count.value, 10) || 1 });
       });
+    }
+
+    // ---- Chain dropdowns ----
+    const saveChain = async (patch) => { await Storage.setSettings(patch); };
+    if (els.chainStrategy) {
+      els.chainStrategy.addEventListener("change", () => saveChain({ chainStrategy: els.chainStrategy.value }));
+    }
+    if (els.chainPromptSource) {
+      els.chainPromptSource.addEventListener("change", () => {
+        const v = els.chainPromptSource.value;
+        if (els.chainSuffixRow) els.chainSuffixRow.hidden = v !== "suffix";
+        saveChain({ chainPromptSource: v });
+      });
+    }
+    if (els.chainSuffix) {
+      els.chainSuffix.addEventListener("change", () => saveChain({ chainPromptSuffix: els.chainSuffix.value }));
+    }
+    if (els.chainRunOrder) {
+      els.chainRunOrder.addEventListener("change", () => saveChain({ chainRunOrder: els.chainRunOrder.value }));
+    }
+    if (els.chainVideoAspect) {
+      els.chainVideoAspect.addEventListener("change", () => saveChain({ chainVideoAspectRatio: els.chainVideoAspect.value || null }));
+    }
+    if (els.chainVideoModel) {
+      els.chainVideoModel.addEventListener("change", () => saveChain({ chainVideoModel: els.chainVideoModel.value }));
     }
 
     // ---- pacing settings ----
@@ -416,6 +492,15 @@
       queueCount: $("snf-queue-count"),
       log: $("snf-log"),
       logClear: $("snf-log-clear"),
+      // chain (Image → Video) settings
+      chainPanel: $("snf-chain-panel"),
+      chainStrategy: $("snf-chain-strategy"),
+      chainPromptSource: $("snf-chain-prompt-source"),
+      chainSuffixRow: $("snf-chain-suffix-row"),
+      chainSuffix: $("snf-chain-suffix"),
+      chainRunOrder: $("snf-chain-run-order"),
+      chainVideoAspect: $("snf-chain-video-aspect"),
+      chainVideoModel: $("snf-chain-video-model"),
       // pacing
       minDelay: $("snf-min-delay"),
       maxDelay: $("snf-max-delay"),
