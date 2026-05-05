@@ -86,7 +86,18 @@
     bodyEls.btnStop = makeEl("button", { class: "snflow-btn", text: "Stop" });
     bodyEls.btnPause.addEventListener("click", () => sendCmd("PAUSE"));
     bodyEls.btnResume.addEventListener("click", () => sendCmd("RESUME"));
-    bodyEls.btnStop.addEventListener("click", () => sendCmd("STOP"));
+    bodyEls.btnStop.addEventListener("click", () => {
+      // Stop halts and resets every queue item to Pending — confirm first.
+      // Pause/Resume preserves state, so users who want that should use Pause.
+      const ok = window.confirm(
+        "Stop will halt all processing immediately and reset every queue item back to Pending.\n\n" +
+        "Next Start will begin again from item 1.\n\n" +
+        "(Pause/Resume preserves state — use Pause if you want to keep position.)\n\n" +
+        "Continue?",
+      );
+      if (!ok) return;
+      sendCmd("STOP");
+    });
     foot.appendChild(bodyEls.btnPause);
     foot.appendChild(bodyEls.btnResume);
     foot.appendChild(bodyEls.btnStop);
