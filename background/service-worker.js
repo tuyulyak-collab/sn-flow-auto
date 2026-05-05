@@ -243,10 +243,19 @@ async function runLoop() {
 
       try {
         const ac = { aborted: false };
+        // The content script's runItem awaits result-watcher with a per-item
+        // timeout that depends on item type — chain video uses a longer
+        // chainVideoTimeoutMs (default 8 min). The SW must wait at least as
+        // long as the content script, otherwise it kills the message channel
+        // mid-generation and marks an in-flight item failed even when Flow
+        // eventually finishes successfully.
+        const contentTimeout = next.chainStep === "video"
+          ? (settings.chainVideoTimeoutMs || 480_000)
+          : (settings.waitTimeoutMs || 300_000);
         const respPromise = sendToTab(tab.id, {
           type: "SN_FLOW_RUN_ITEM",
           payload: { item: next, settings },
-        }, (settings.waitTimeoutMs || 300_000) + 60_000)
+        }, contentTimeout + 60_000)
           .then((resp) => ({ resp }))
           .catch((e) => ({ err: e }));
         const skipPromise = waitForSkip(ac).then(() => ({ skipped: true }));
