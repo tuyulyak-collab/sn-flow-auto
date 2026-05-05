@@ -188,6 +188,86 @@ html, body {
 .snf-fullw { width: 100%; }
 .snf-pacing-card .snf-card-head { margin-bottom: 6px; }
 .snf-pacing-toggles { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+
+/* Download Settings card (PR #15) — lives inside the Settings overlay.
+ * Matches the warm cream / coral / mint palette of the rest of the popup
+ * and stays beginner-friendly: short helper text under each control,
+ * inline error messages in the brand red, gradient-tinted token chips. */
+.snf-download-card .snf-card-head { margin-bottom: 6px; }
+.snf-download-card .snf-col + .snf-col { margin-top: 12px; }
+.snf-helper { margin: 4px 0 0 0; font-size: 11px; color: #6b4242; }
+.snf-token-helper {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: linear-gradient(135deg, rgba(225, 238, 195, 0.55) 0%, rgba(255, 244, 232, 0.85) 100%);
+  border: 1px solid rgba(240, 80, 83, 0.12);
+  border-radius: 10px;
+}
+.snf-token-helper-title {
+  margin: 0 0 4px 0;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #4a1c1c;
+}
+.snf-token-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 11px;
+  color: #4a2b2b;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.snf-token-list code {
+  display: inline-block;
+  padding: 1px 6px;
+  margin-right: 4px;
+  background: #fff;
+  border: 1px solid rgba(240, 80, 83, 0.22);
+  border-radius: 6px;
+  font-size: 11px;
+  color: #4a1c1c;
+}
+.snf-folder-warn {
+  margin: 8px 0 0 0;
+  padding: 8px 10px;
+  background: rgba(240, 80, 83, 0.08);
+  border: 1px solid rgba(240, 80, 83, 0.22);
+  border-radius: 10px;
+  font-size: 11px;
+  color: #8a1a1a;
+}
+.snf-error {
+  margin: 6px 0 0 0;
+  color: #b6322f;
+  font-weight: 700;
+}
+.snf-preview {
+  margin: 6px 0 0 0;
+  padding: 6px 10px;
+  background: #fff;
+  border: 1px dashed rgba(240, 80, 83, 0.28);
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: #4a1c1c;
+  word-break: break-all;
+}
+.snf-input-error {
+  border-color: #b6322f !important;
+  background: #fff5f3 !important;
+  box-shadow: 0 0 0 3px rgba(182, 50, 47, 0.12) !important;
+}
+.snf-download-actions { flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.snf-download-actions-helper {
+  margin: 6px 0 0 0;
+  font-size: 11px;
+  color: #6b4242;
+  line-height: 1.5;
+}
 .snf-check {
   display: flex; align-items: flex-start; gap: 8px;
   font-size: 12px; color: #2b1a1a;

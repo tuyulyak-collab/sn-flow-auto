@@ -100,6 +100,34 @@
     // chainVideoTimeoutMs — video gen takes much longer than image; bump
     // the per-item wait timeout for chained video items only.
     chainVideoTimeoutMs: 8 * 60 * 1000, // 8 min
+
+    // ---- Download Settings (PR #15) ----
+    // User-configurable download path: a relative subfolder inside Chrome's
+    // Downloads directory + a filename template with token shortcuts.
+    // See core/download-path.js for sanitization + token expansion.
+    //
+    // filenameTemplate — body of the saved file name, no extension. Tokens:
+    //   {random5}    random 5 alphanumeric chars (default behaviour)
+    //   {ddmmyyyy}   today's date, no separators
+    //   {mode}       image | video | chain
+    //   {index}      queue position (1-based)
+    //   {promptSlug} short safe slug of the prompt
+    filenameTemplate: "SN_flow_{random5}_{ddmmyyyy}",
+    // outputFolder — relative path inside the user's Downloads folder.
+    // Empty string is allowed (means "save directly in Downloads"). Subpaths
+    // are joined with "/". Tokens above are also expanded inside folder
+    // segments (e.g. "SN Flow Auto/{ddmmyyyy}").
+    outputFolder: "SN Flow Auto",
+    // conflictAction — chrome.downloads.download conflictAction. We only
+    // expose "uniquify" (default; keeps both files) and "overwrite" via the
+    // "Keep both files if name already exists" checkbox in the popup. We
+    // never expose "prompt" because batch auto-download must run without
+    // user clicks.
+    conflictAction: "uniquify",
+    // lastDownloadId — chrome.downloads.download id of the most recent
+    // completed download, used by the "Open Last Download" button. Updated
+    // by background/service-worker.js after every successful download.
+    lastDownloadId: null,
   };
 
   function get(keys) {

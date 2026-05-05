@@ -7,6 +7,7 @@
   const Log = root.SNFlowLogger;
   const Retry = root.SNFlowRetry;
   const Filename = root.SNFlowFilename;
+  const DownloadPath = root.SNFlowDownloadPath;
   const Dom = root.SNFlowDom;
   const PromptInput = root.SNFlowPromptInput;
   const Generate = root.SNFlowGenerate;
@@ -200,10 +201,32 @@
     const downloads = [];
     for (let i = 0; i < result.items.length; i++) {
       const m = result.items[i];
-      const filename = Filename.buildFilename({
-        mode: result.mode || itemMode,
-        media: { url: m.url, ext: Filename.extFor(m.url, result.mode === "video" ? "mp4" : "png") },
-      });
+      const ext = Filename.extFor(m.url, result.mode === "video" ? "mp4" : "png");
+      // Build the file name body from the user's template (PR #15). Tokens:
+      // {random5} {ddmmyyyy} {mode} {index} {promptSlug}. The SW prepends
+      // settings.outputFolder and applies settings.conflictAction — the
+      // content script just produces a sanitized "<body>.<ext>" string.
+      let filename;
+      if (DownloadPath && settings && settings.filenameTemplate) {
+        const ctx = {
+          mode: result.mode || itemMode,
+          index: item.queueIndex || (i + 1),
+          prompt: item.prompt,
+          promptSlug: DownloadPath.slugifyPrompt(item.prompt),
+        };
+        const expanded = DownloadPath.expandTemplate(settings.filenameTemplate, ctx);
+        const safeBody = DownloadPath.sanitizeFilenameBody(expanded);
+        filename = `${safeBody}.${ext}`;
+      } else {
+        // Fallback: legacy SN_flow_{random5}_{ddmmyyyy} format. Used when
+        // the user hasn't migrated yet (e.g. older settings stored in
+        // chrome.storage before PR #15) or when DownloadPath is missing
+        // due to a partial script load.
+        filename = Filename.buildFilename({
+          mode: result.mode || itemMode,
+          media: { url: m.url, ext },
+        });
+      }
       try {
         const dl = await Retry.retry(
           () => Downloader.downloadResult(m.element, m.url, filename),
