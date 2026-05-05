@@ -67,6 +67,7 @@
           <select id="snf-chain-prompt-source" class="snf-select snf-fullw">
             <option value="same">Same as image prompt</option>
             <option value="suffix">Image prompt + suffix</option>
+            <option value="custom">Custom (write video prompt below)</option>
           </select>
         </div>
         <div class="snf-col">
@@ -102,6 +103,14 @@
         <label class="snf-label" for="snf-chain-suffix">Video prompt suffix</label>
         <input id="snf-chain-suffix" class="snf-input snf-fullw" type="text"
           placeholder="e.g. with a slow cinematic camera dolly-in" />
+      </div>
+      <div id="snf-chain-custom-row" class="snf-chain-suffix-row" hidden>
+        <label class="snf-label" for="snf-chain-custom">Custom video prompt</label>
+        <textarea id="snf-chain-custom" class="snf-input snf-fullw" rows="2"
+          placeholder="e.g. cinematic dolly-in, soft sunset light, 24fps. {prompt} is replaced with each image prompt."></textarea>
+        <p class="snf-meta" style="margin: 4px 0 0 0; font-size: 11px;">
+          Use <code>{prompt}</code> to insert the image prompt. Leave empty to use the image prompt verbatim.
+        </p>
       </div>
       <p class="snf-meta snf-chain-note">
         Each prompt becomes 2 queue rows: image step + chained video step.
