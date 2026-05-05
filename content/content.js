@@ -224,7 +224,9 @@
           const raw = String((err && err.message) || err);
           // Translate common DOM errors into readable messages
           let friendly = raw;
-          if (/prompt input not found/i.test(raw)) {
+          if (/Flow UI crashed/i.test(raw)) {
+            friendly = "Flow's UI crashed (Application error). Please reload the Flow tab and click Start again.";
+          } else if (/prompt input not found/i.test(raw)) {
             friendly = "Could not find prompt input — Flow UI may have changed or not fully loaded.";
           } else if (/Flow rejected submit/i.test(raw)) {
             friendly = "Flow rejected the prompt as empty — the editor's React state did not register the text. Try reloading the Flow tab.";

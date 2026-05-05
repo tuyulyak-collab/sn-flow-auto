@@ -38,6 +38,26 @@
     return false;
   }
 
+  // Flow's submit button wraps its accessible label in a visually-hidden
+  // span (clip:rect(0 0 0 0) / common sr-only utility classes). Detecting
+  // this pattern boosts the *real* submit button over any other button that
+  // happens to share its arrow_forward glyph (e.g. a future toolbar button
+  // that uses the same Material symbol but renders the label as visible
+  // text — that one would NOT have the visually-hidden wrapper).
+  function hasVisuallyHiddenLabel(btn) {
+    if (!btn || !btn.querySelectorAll) return false;
+    try {
+      for (const sp of btn.querySelectorAll("span")) {
+        const cls = (sp.className || "").toString().toLowerCase();
+        if (/(sr-only|visually-hidden|screen-reader|a11y-hidden)/.test(cls)) return true;
+        const inline = (sp.getAttribute("style") || "").toLowerCase();
+        if (/clip\s*:\s*rect\s*\(\s*0\s+0\s+0\s+0\s*\)/.test(inline)) return true;
+        if (/clip-path\s*:\s*inset\s*\(\s*100%\s*\)/.test(inline)) return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
   function score(el, anchor) {
     let s = 0;
     const text = D.elText(el);
@@ -62,6 +82,11 @@
     if (el.tagName === "BUTTON") s += 1;
     // a button living inside a <form> is much more likely to be Generate
     try { if (el.closest && el.closest("form")) s += 3; } catch (_) {}
+    // visually-hidden a11y label is the strongest signal for Flow's submit:
+    // toolbar / nav buttons render their label as visible text, so any
+    // button with a sr-only label AND an arrow icon is almost certainly
+    // the prompt-bar submit button.
+    if (hasVisuallyHiddenLabel(el)) s += 6;
 
     if (anchor) {
       const d = D.distance(el, anchor);
@@ -144,6 +169,10 @@
     while (Date.now() - start < totalMs) {
       await new Promise((r) => setTimeout(r, 120));
 
+      // Negative signal: Flow's React tree crashed. Stop polling immediately
+      // — no further click or Enter will recover, the user must reload.
+      if (isFlowCrashed()) return { ok: false, flowCrashed: true };
+
       // Negative signal: validation toast.
       const toast = findValidationToast();
       if (toast) return { ok: false, validationError: toast };
@@ -204,8 +233,37 @@
     return null;
   }
 
+  // Detect Flow's Next.js client-side crash overlay. When Flow's React tree
+  // throws an unhandled exception during/after a submit, Next.js renders a
+  // full-screen "Application error" placeholder that blocks the rest of the
+  // app. Once this happens, retrying click/Enter is futile and our run loop
+  // would just hammer the dead page until the result-watcher times out 5 min
+  // later. Detecting it lets us throw a clear error so the user can reload.
+  const FLOW_CRASH_RE =
+    /application\s+error\s*:?\s*(a\s+)?client[-\s]side\s+exception\s+has\s+occurred(\s+while\s+loading\s+labs\.google)?/i;
+
+  function isFlowCrashed() {
+    try {
+      // Next.js renders the crash overlay at body level. It's usually one of
+      // a small set of nodes; check both body text (cheap) and any prominent
+      // top-level <h1>/<h2>/<p> elements.
+      const bodyTxt = (document.body && (document.body.innerText || document.body.textContent) || "").slice(0, 4000);
+      if (FLOW_CRASH_RE.test(bodyTxt)) return true;
+    } catch (_) {}
+    return false;
+  }
+
   async function clickGenerate(promptEl) {
     const Log = root.SNFlowLogger;
+
+    // Pre-flight: if Flow's React tree has already crashed, every click and
+    // keystroke we attempt will be ignored. Bail out with a clear error so
+    // the user (or the run loop) can reload the tab instead of looping
+    // through 3 retry attempts to a dead page.
+    if (isFlowCrashed()) {
+      throw new Error("Flow UI crashed: please reload the Flow tab");
+    }
+
     const btn = findGenerateButton(promptEl);
 
     // Capture prompt-input value before submit so verifySubmitted can detect
@@ -233,6 +291,9 @@
 
     // First verification — did the button click do anything?
     let result = await verifySubmitted(promptEl, btn, beforeText, btn ? 2500 : 0);
+    if (result.flowCrashed) {
+      throw new Error("Flow UI crashed: please reload the Flow tab");
+    }
     if (result.validationError) {
       throw new Error("Flow rejected submit: " + result.validationError);
     }
@@ -245,6 +306,9 @@
       clickedVia = clickedVia ? clickedVia + "+enter" : "enter";
       if (Log && Log.log) Log.log("[SN Flow] generate: pressed Enter on prompt input as fallback");
       result = await verifySubmitted(promptEl, btn, beforeText, 2500);
+      if (result.flowCrashed) {
+        throw new Error("Flow UI crashed: please reload the Flow tab");
+      }
       if (result.validationError) {
         throw new Error("Flow rejected submit: " + result.validationError);
       }
@@ -258,5 +322,5 @@
     return false;
   }
 
-  root.SNFlowGenerate = { findGenerateButton, clickGenerate, describeButton };
+  root.SNFlowGenerate = { findGenerateButton, clickGenerate, describeButton, isFlowCrashed };
 })(typeof self !== "undefined" ? self : this);
