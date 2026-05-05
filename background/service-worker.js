@@ -152,14 +152,53 @@ async function runLoop() {
       if (run.paused) { await Retry.sleep(500); continue; }
 
       const queue = await Storage.getQueue();
-      const next = Queue.nextPending(queue);
+      const settings = await Storage.getSettings();
+
+      // Auto-skip chained video items whose parent failed/skipped — they
+      // can never produce a valid input image, so we don't want them to
+      // block the queue or flap as "pending" forever. We do this BEFORE
+      // nextPending() so the skipped state is persistent and visible.
+      let mutated = false;
+      const updated = queue.map((q) => {
+        if (Queue.shouldAutoSkip(queue, q) && q.status === "pending") {
+          mutated = true;
+          return {
+            ...q,
+            status: "skipped",
+            error: "parent image step did not complete",
+            updatedAt: Date.now(),
+          };
+        }
+        return q;
+      });
+      if (mutated) {
+        await Storage.setQueue(updated);
+        continue; // re-read queue with auto-skips applied
+      }
+
+      let next = Queue.nextPending(queue, { chainRunOrder: settings.chainRunOrder });
       if (!next) {
         Log.log("queue done");
         await Storage.setRunState({ running: false, paused: false, currentId: null });
         break;
       }
 
-      const settings = await Storage.getSettings();
+      // Chain video step: copy the parent image's mediaUrl onto the
+      // outgoing item as inputMediaUrl so the content script can attach
+      // it as the video input. PR #6 sets the field but content/content.js
+      // doesn't yet use it (PR #7 wires attachInputImage). The defaulting
+      // is defensive — Queue.nextPending already gates on parent.completed.
+      if (next.chainStep === "video" && next.parentId) {
+        const parent = queue.find((q) => q.id === next.parentId);
+        if (parent && parent.status === "completed" && (parent.mediaUrl || parent.filename)) {
+          next = {
+            ...next,
+            inputMediaUrl: parent.mediaUrl || null,
+            inputFilename: parent.filename || null,
+          };
+        }
+      }
+
       await Storage.setRunState({ currentId: next.id });
       await Storage.updateItem(next.id, { status: "sending", attempts: (next.attempts || 0) + 1 });
 

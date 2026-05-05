@@ -25,6 +25,7 @@
         <select id="snf-mode" class="snf-select snf-fullw">
           <option value="image">Image</option>
           <option value="video">Video</option>
+          <option value="chain">Chain (Image → Video)</option>
         </select>
       </div>
       <div class="snf-col">
@@ -46,6 +47,67 @@
           <option value="4">x4</option>
         </select>
       </div>
+    </div>
+
+    <div id="snf-chain-panel" class="snf-chain-panel" hidden>
+      <div class="snf-chain-head">
+        <h2>Chain (Image → Video)</h2>
+        <span class="snf-meta">For every prompt, generate the image first, then auto-feed it to a video gen.</span>
+      </div>
+      <div class="snf-grid3">
+        <div class="snf-col">
+          <label class="snf-label" for="snf-chain-strategy">Image → Video</label>
+          <select id="snf-chain-strategy" class="snf-select snf-fullw">
+            <option value="first">Use first image only</option>
+            <option value="all">Chain every image variant</option>
+          </select>
+        </div>
+        <div class="snf-col">
+          <label class="snf-label" for="snf-chain-prompt-source">Video prompt</label>
+          <select id="snf-chain-prompt-source" class="snf-select snf-fullw">
+            <option value="same">Same as image prompt</option>
+            <option value="suffix">Image prompt + suffix</option>
+          </select>
+        </div>
+        <div class="snf-col">
+          <label class="snf-label" for="snf-chain-run-order">Run order</label>
+          <select id="snf-chain-run-order" class="snf-select snf-fullw">
+            <option value="interleave">Per prompt (image → video)</option>
+            <option value="batch">Batch (all images, then all videos)</option>
+          </select>
+        </div>
+      </div>
+      <div class="snf-grid2">
+        <div class="snf-col">
+          <label class="snf-label" for="snf-chain-video-aspect">Video aspect ratio</label>
+          <select id="snf-chain-video-aspect" class="snf-select snf-fullw">
+            <option value="">Same as image</option>
+            <option value="16:9">16:9 — Landscape</option>
+            <option value="4:3">4:3</option>
+            <option value="1:1">1:1 — Square</option>
+            <option value="3:4">3:4</option>
+            <option value="9:16">9:16 — Portrait</option>
+          </select>
+        </div>
+        <div class="snf-col">
+          <label class="snf-label" for="snf-chain-video-model">Video model</label>
+          <select id="snf-chain-video-model" class="snf-select snf-fullw">
+            <option value="auto">Auto (use Flow's current selection)</option>
+            <option value="veo">Veo</option>
+            <option value="veo-2">Veo 2</option>
+          </select>
+        </div>
+      </div>
+      <div id="snf-chain-suffix-row" class="snf-chain-suffix-row" hidden>
+        <label class="snf-label" for="snf-chain-suffix">Video prompt suffix</label>
+        <input id="snf-chain-suffix" class="snf-input snf-fullw" type="text"
+          placeholder="e.g. with a slow cinematic camera dolly-in" />
+      </div>
+      <p class="snf-meta snf-chain-note">
+        Each prompt becomes 2 queue rows: image step + chained video step.
+        The video step waits for the image to complete, then attaches the
+        image as input for the video gen.
+      </p>
     </div>
 
     <label class="snf-label" for="snf-prompts">Prompts (one per line)</label>

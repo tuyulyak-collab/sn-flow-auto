@@ -281,3 +281,52 @@ html, body {
 .snf-dialog-actions .snf-btn {
   min-width: 88px;
 }
+
+/* Chain (Image → Video) settings panel — appears between mode/aspect/output
+ * and the prompts textarea when Mode = "Chain". Slightly indented panel
+ * inside the same card so it visually groups with the mode controls. */
+.snf-chain-panel {
+  margin: 10px 0 6px 0;
+  padding: 12px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(225, 238, 195, 0.55) 0%, rgba(240, 80, 83, 0.10) 100%);
+  border: 1px solid rgba(240, 80, 83, 0.18);
+}
+.snf-chain-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 8px; margin-bottom: 8px;
+}
+.snf-chain-head h2 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 800;
+  color: #4a1c1c;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+}
+.snf-chain-head .snf-meta {
+  flex: 1; text-align: right;
+}
+.snf-chain-suffix-row {
+  margin-top: 8px;
+}
+.snf-chain-note {
+  margin: 8px 0 0 0;
+  font-size: 11px;
+  color: #6b4242;
+  line-height: 1.45;
+}
+
+/* Chain rows in the queue table — slight indentation + a leading ↳ glyph
+ * to show the parent → child relationship. The glyph is added in JS as a
+ * span.snf-chain-arrow on the prompt cell. */
+.snf-chain-row .snf-prompt-cell {
+  padding-left: 16px;
+}
+.snf-chain-arrow {
+  display: inline-block;
+  margin-right: 6px;
+  color: #b6322f;
+  font-weight: 700;
+  opacity: 0.85;
+}

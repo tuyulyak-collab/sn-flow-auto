@@ -63,6 +63,30 @@
       await Retry.sleep(200);
     }
 
+    // 0b) Chain mode — if this is a chained video step, the service worker
+    // will have set item.inputMediaUrl to the parent image's mediaUrl. We
+    // need to attach that image to Flow as input before typing the prompt.
+    // The actual attachInputImage implementation lands in PR #7
+    // (content/flow-add-media.js). For PR #6 we just log + warn so the run
+    // doesn't silently skip the attachment step.
+    if (item.chainStep === "video" && item.inputMediaUrl) {
+      const FlowMedia = root.SNFlowAddMedia;
+      if (FlowMedia && FlowMedia.attachInputImage) {
+        try {
+          const ok = await FlowMedia.attachInputImage(item.inputMediaUrl, {
+            filename: item.inputFilename,
+          });
+          Log.log("chain input image attached", { ok });
+        } catch (e) {
+          throw new Error("attachInputImage failed: " + String(e && e.message || e));
+        }
+      } else {
+        Log.warn("chain video step received inputMediaUrl but flow-add-media.js " +
+                 "is not loaded yet (lands in PR #7) — generating video WITHOUT " +
+                 "the input image attached");
+      }
+    }
+
     // 1) sending prompt
     await reportStatus(item.id, "sending");
     const promptEl = await Retry.waitFor(() => PromptInput.findPromptInput(), {
