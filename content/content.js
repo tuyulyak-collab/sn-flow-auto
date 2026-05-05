@@ -19,6 +19,35 @@
     return;
   }
 
+  // Track the currently in-flight runItem so the floating panel / popup
+  // can abort it via SN_FLOW_SKIP. The SW also sends SN_FLOW_SKIP when
+  // the user clicks Skip on the floating panel; we surface that as a
+  // 'user-skipped' rejection so the long media wait short-circuits.
+  let currentRun = null;
+  function makeRunHandle(itemId) {
+    const handle = {
+      itemId,
+      aborted: false,
+      _waiters: [],
+      abort() {
+        if (handle.aborted) return;
+        handle.aborted = true;
+        for (const r of handle._waiters) try { r(new Error("user-skipped")); } catch (_) {}
+        handle._waiters.length = 0;
+      },
+      // Returns a promise that rejects with "user-skipped" if abort() is
+      // ever called. Use Promise.race([work, handle.abortSignal()]) inside
+      // long-running ops so they exit early on Skip.
+      abortSignal() {
+        return new Promise((_, reject) => {
+          if (handle.aborted) reject(new Error("user-skipped"));
+          else handle._waiters.push(reject);
+        });
+      },
+    };
+    return handle;
+  }
+
   function ping() {
     return {
       ok: true,
@@ -37,6 +66,11 @@
 
   async function runItem({ item, settings }) {
     if (!item || !item.prompt) throw new Error("invalid item");
+    // Per-run abort handle. Skip messages from the popup/floating/SW set
+    // currentRun.aborted=true so long awaits inside this function exit
+    // early via Promise.race against handle.abortSignal().
+    const run = makeRunHandle(item.id);
+    currentRun = run;
     const itemMode = item.mode || (settings && settings.mode) || "image";
     const itemRatio = item.aspectRatio || (settings && settings.aspectRatio) || "16:9";
     const itemCount = parseInt(item.outputCount || (settings && settings.outputCount) || 1, 10);
@@ -141,15 +175,24 @@
     const waitOpts = {
       timeout: (item.chainStep === "video") ? chainVideoTimeout : baseTimeout,
     };
+    // Race the long wait against the abort signal so Skip can short-
+    // circuit a 5-min waitForBatch immediately.
     let result;
     if (itemCount > 1) {
-      result = await ResultWatcher.waitForBatch(before, itemMode, itemCount, waitOpts);
+      result = await Promise.race([
+        ResultWatcher.waitForBatch(before, itemMode, itemCount, waitOpts),
+        run.abortSignal(),
+      ]);
       if (!result || !result.items || !result.items.length) throw new Error("timed out waiting for media");
     } else {
-      const r = await ResultWatcher.waitForNewMedia(before, itemMode, waitOpts);
+      const r = await Promise.race([
+        ResultWatcher.waitForNewMedia(before, itemMode, waitOpts),
+        run.abortSignal(),
+      ]);
       if (!r || !r.url) throw new Error("timed out waiting for media");
       result = { mode: r.mode, items: r.all && r.all.length ? r.all : [{ url: r.url, element: r.element }] };
     }
+    if (run.aborted) throw new Error("user-skipped");
     Log.log("media detected", { count: result.items.length, mode: result.mode });
 
     // 4) download each item — retry each download up to 2 times on failure
@@ -217,14 +260,52 @@
       sendResponse({ ok: true });
       return false;
     }
+    if (msg.type === "SN_FLOW_SKIP") {
+      // SW → content: user clicked Skip. Abort the in-flight runItem
+      // so its long media-wait throws 'user-skipped' immediately. The
+      // SW already marked the queue item as 'skipped' before sending
+      // this message, so we don't need to update storage here.
+      try {
+        const wantedId = msg.payload && msg.payload.id;
+        if (currentRun && (!wantedId || currentRun.itemId === wantedId)) {
+          currentRun.abort();
+        }
+      } catch (_) {}
+      sendResponse({ ok: true });
+      return false;
+    }
+    if (msg.type === "SN_FLOW_OPEN_FLOATING") {
+      // Popup → content: explicit open of the floating panel (full mode).
+      // Used by the popup's 🖥 floating header icon. We force-open and also
+      // un-minimize so the user always sees the full panel.
+      try {
+        if (root.SNFlowMonitor) {
+          root.SNFlowMonitor.toggleOpen(true);
+          if (root.SNFlowMonitor.toggleMinimize) {
+            // Best-effort: ensure the panel is expanded, not minimized
+            const el = document.getElementById("snflow-monitor");
+            if (el && el.classList.contains("snflow-min")) {
+              root.SNFlowMonitor.toggleMinimize();
+            }
+          }
+          if (root.SNFlowMonitor.refresh) root.SNFlowMonitor.refresh();
+        }
+      } catch (_) {}
+      sendResponse({ ok: true });
+      return false;
+    }
     if (msg.type === "SN_FLOW_RUN_ITEM") {
       runItem(msg.payload || {})
         .then((res) => sendResponse({ ok: true, ...res }))
         .catch((err) => {
           const raw = String((err && err.message) || err);
-          // Translate common DOM errors into readable messages
+          // Translate common DOM errors into readable messages.
+          // user-skipped is forwarded as-is so the SW can recognize it
+          // and treat the item as 'skipped' instead of 'failed'.
           let friendly = raw;
-          if (/prompt input not found/i.test(raw)) {
+          if (/user.?skipped/i.test(raw)) {
+            friendly = "user-skipped";
+          } else if (/prompt input not found/i.test(raw)) {
             friendly = "Could not find prompt input — Flow UI may have changed or not fully loaded.";
           } else if (/Flow rejected submit/i.test(raw)) {
             friendly = "Flow rejected the prompt as empty — the editor's React state did not register the text. Try reloading the Flow tab.";

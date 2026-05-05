@@ -16,6 +16,16 @@
       </div>
     </div>
     <div class="snf-pill" id="snf-status">idle</div>
+    <div class="snf-header-actions">
+      <button type="button" id="snf-open-settings" class="snf-icon-action" title="Settings (Safe Speed &amp; Delays)" aria-label="Settings">
+        <span class="snf-icon-glyph" aria-hidden="true">⚙</span>
+        <span class="snf-icon-label">settings</span>
+      </button>
+      <button type="button" id="snf-open-floating" class="snf-icon-action" title="Open floating panel on Flow tab" aria-label="Floating panel">
+        <span class="snf-icon-glyph" aria-hidden="true">▢</span>
+        <span class="snf-icon-label">floating</span>
+      </button>
+    </div>
   </header>
 
   <section class="snf-card">
@@ -131,50 +141,70 @@
     </div>
   </section>
 
-  <section class="snf-card snf-pacing-card">
-    <div class="snf-card-head">
-      <h2>Safe Speed &amp; Delays</h2>
-      <span class="snf-meta">Control how fast prompts run so the batch stays stable.</span>
+  <!--
+    Settings overlay (gear icon). Slides in from the right and hosts the
+    'Safe Speed & Delays' (formerly inline) section, plus any future
+    settings groups. Doesn't change any storage / pacing behavior — only
+    relocates the existing controls.
+  -->
+  <aside id="snf-settings-panel" class="snf-settings-panel" hidden aria-hidden="true">
+    <header class="snf-settings-head">
+      <button type="button" id="snf-settings-back" class="snf-icon-action snf-settings-back" title="Back" aria-label="Back">
+        <span class="snf-icon-glyph" aria-hidden="true">←</span>
+      </button>
+      <h2>Settings</h2>
+      <button type="button" id="snf-settings-close" class="snf-icon-action snf-settings-close" title="Close settings" aria-label="Close settings">
+        <span class="snf-icon-glyph" aria-hidden="true">×</span>
+      </button>
+    </header>
+
+    <div class="snf-settings-body">
+      <section class="snf-card snf-pacing-card">
+        <div class="snf-card-head">
+          <h2>Safe Speed &amp; Delays</h2>
+          <span class="snf-meta">Control how fast prompts run so the batch stays stable.</span>
+        </div>
+        <div class="snf-grid2">
+          <div class="snf-col">
+            <label class="snf-label" for="snf-min-delay">Minimum delay (seconds)</label>
+            <input id="snf-min-delay" class="snf-input" type="number" min="0" step="1" value="30" />
+          </div>
+          <div class="snf-col">
+            <label class="snf-label" for="snf-max-delay">Maximum delay (seconds)</label>
+            <input id="snf-max-delay" class="snf-input" type="number" min="0" step="1" value="60" />
+          </div>
+        </div>
+        <div class="snf-grid2">
+          <div class="snf-col">
+            <label class="snf-label" for="snf-cooldown-every">Take a break every</label>
+            <input id="snf-cooldown-every" class="snf-input" type="number" min="0" step="1" value="5" />
+          </div>
+          <div class="snf-col">
+            <label class="snf-label" for="snf-cooldown-ms">Break length (seconds)</label>
+            <input id="snf-cooldown-ms" class="snf-input" type="number" min="0" step="1" value="180" />
+          </div>
+        </div>
+        <div class="snf-pacing-toggles">
+          <label class="snf-check">
+            <input id="snf-adaptive" type="checkbox" checked />
+            <span>Slow down automatically when Flow gets busy</span>
+          </label>
+          <label class="snf-check">
+            <input id="snf-pause-rl" type="checkbox" checked />
+            <span>Pause automatically after 3 repeated errors</span>
+          </label>
+          <label class="snf-check snf-warn">
+            <input id="snf-aggressive" type="checkbox" />
+            <span><strong>Fast mode</strong> — remove all delays</span>
+          </label>
+          <p class="snf-meta" style="margin: 4px 0 0 28px;">Not recommended. This may cause more errors or usage limits.</p>
+        </div>
+        <div class="snf-pacer-state">
+          <span id="snf-pacer-meta" class="snf-meta">—</span>
+        </div>
+      </section>
     </div>
-    <div class="snf-grid2">
-      <div class="snf-col">
-        <label class="snf-label" for="snf-min-delay">Minimum delay (seconds)</label>
-        <input id="snf-min-delay" class="snf-input" type="number" min="0" step="1" value="30" />
-      </div>
-      <div class="snf-col">
-        <label class="snf-label" for="snf-max-delay">Maximum delay (seconds)</label>
-        <input id="snf-max-delay" class="snf-input" type="number" min="0" step="1" value="60" />
-      </div>
-    </div>
-    <div class="snf-grid2">
-      <div class="snf-col">
-        <label class="snf-label" for="snf-cooldown-every">Take a break every</label>
-        <input id="snf-cooldown-every" class="snf-input" type="number" min="0" step="1" value="5" />
-      </div>
-      <div class="snf-col">
-        <label class="snf-label" for="snf-cooldown-ms">Break length (seconds)</label>
-        <input id="snf-cooldown-ms" class="snf-input" type="number" min="0" step="1" value="180" />
-      </div>
-    </div>
-    <div class="snf-pacing-toggles">
-      <label class="snf-check">
-        <input id="snf-adaptive" type="checkbox" checked />
-        <span>Slow down automatically when Flow gets busy</span>
-      </label>
-      <label class="snf-check">
-        <input id="snf-pause-rl" type="checkbox" checked />
-        <span>Pause automatically after 3 repeated errors</span>
-      </label>
-      <label class="snf-check snf-warn">
-        <input id="snf-aggressive" type="checkbox" />
-        <span><strong>Fast mode</strong> — remove all delays</span>
-      </label>
-      <p class="snf-meta" style="margin: 4px 0 0 28px;">Not recommended. This may cause more errors or usage limits.</p>
-    </div>
-    <div class="snf-pacer-state">
-      <span id="snf-pacer-meta" class="snf-meta">—</span>
-    </div>
-  </section>
+  </aside>
 
   <section class="snf-card">
     <div class="snf-progress-wrap">
