@@ -20,6 +20,9 @@ e.g. SN_flow_A7K2Q_05052026.mp4
 - **Manifest V3** — service worker + content scripts.
 - **Manual prompt textarea** + **Import .txt** (1 baris = 1 prompt).
 - **Mode selector**: `IMAGE` / `VIDEO` (per batch).
+- **Aspect ratio**: `16:9 / 4:3 / 1:1 / 3:4 / 9:16` (per batch).
+- **Output count**: `x1 / x2 / x3 / x4` (per batch — Flow generates N tiles per
+  prompt, semua tiles auto-download).
 - **Queue system** dengan status:
   `Pending`, `Sending Prompt`, `Generating`, `Waiting Result`, `Downloading`,
   `Completed`, `Failed`, `Skipped`.
@@ -133,25 +136,32 @@ monitor read it via `chrome.storage.onChanged`.
 
 ---
 
-## Catatan Teknis
+## Catatan Teknis — DOM Contract Google Flow
 
-- Google Flow's DOM is dynamic / lazy-loaded and may use Shadow DOM. Selectors
-  here are intentionally generic and **scored**:
-  - prompt input: prefer visible `role=textbox` / `contenteditable` /
-    `<textarea>` whose label contains keywords like `prompt`, `describe`,
-    `imagine`, `video`, etc.
-  - generate button: prefer buttons with text `generate`, `create`, `submit`,
-    `send`, `go`, or arrow-right SVG, **closest to the prompt input**.
-  - result watcher: snapshots all `<img>`/`<video>` URLs before clicking
-    Generate, then waits for new media via `MutationObserver`-style polling
-    + `PerformanceObserver` resource events.
-  - downloader: searches ancestors of the new media for a button with text
-    `download` / `save` / `export` or a download-shaped SVG. Falls back to
-    `chrome.downloads.download({ url, filename })` so we always get our own
-    filename.
-- Bila Google Flow menambah selector spesifik nanti (mis. `data-testid` atau
-  attribute baru), tambahkan ke `content/prompt-input.js` /
-  `content/generate-button.js` / `content/downloader.js`.
+DOM contract yang sudah diobservasi langsung di
+`https://labs.google/fx/tools/flow` (May 2026) dan jadi dasar selector
+extension ini:
+
+| Element | Selector | Notes |
+| --- | --- | --- |
+| Prompt input | `[data-slate-editor="true"]` (Slate.js, role=textbox, contenteditable) | Pakai `document.execCommand("insertText")` supaya beforeinput observer Slate menerima text. |
+| Generate (Create) button | `<button type="submit">` di dalam `<form>`, berisi `<i>arrow_forward</i>` (Google Symbols), label visible-hidden "Create" | Sudah scored juga via keyword `create/generate/send/go`. |
+| Settings dropdown trigger (chip kiri tombol Send) | `<button aria-haspopup="menu">` yang labelnya berisi nama model + icon `crop_*` + `xN` | Klik buka Radix popper berisi 3 tablist (mode/ratio/count). |
+| Mode tab | `[role="tab"][id$="-trigger-IMAGE"]`, `…-VIDEO` | `aria-selected="true"` = aktif. |
+| Aspect ratio tab | `[role="tab"][id$="-trigger-LANDSCAPE"]` (16:9), `…-LANDSCAPE_4_3` (4:3), `…-SQUARE` (1:1), `…-PORTRAIT_3_4` (3:4), `…-PORTRAIT` (9:16) | Beberapa option bisa disabled untuk mode tertentu (misal video kadang menolak 1:1). |
+| Output count tab | `[role="tab"][id$="-trigger-1"|"-2"|"-3"|"-4"]` | Label text `x1 / x2 / x3 / x4`. |
+| Tile result | `<a class="sc-3ab8616e-…"><img alt="Generated image" src="…/media.getMediaUrlRedirect?name=<UUID>" /></a>` | Untuk video: `<video src="…/media.getMediaUrlRedirect?name=<UUID>">`. URL redirect endpoint sama untuk image & video. |
+| Tile hover toolbar (3 tombol) | Buttons overlay tile berisi icon `favorite`, `redo`, `more_vert` | Muncul setelah hover; extension dispatch synthetic `mouseenter/over/move`. |
+| Native Download | Klik `more_vert` → Radix menu `[role="menu"][data-state="open"]` → menuitem dengan `<i>download</i>` icon | Extension klik menuitem ini DAN tetap fire `chrome.downloads.download()` URL-based supaya nama file tetap `SN_flow_*`. |
+
+Strategi extension: pakai selector spesifik di atas sebagai **fast path**,
+fallback ke scoring heuristic (keyword + size + position + proximity ke
+prompt input) supaya tetap jalan kalau Google Flow refactor minor.
+
+Semua content script jalan di `document_idle` di
+`labs.google/* | flow.google/* | aitestkitchen.withgoogle.com/*` dan walk
+open Shadow DOM via `SNFlowDom.queryAllDeep` (lihat
+`content/flow-detector.js`).
 
 ---
 

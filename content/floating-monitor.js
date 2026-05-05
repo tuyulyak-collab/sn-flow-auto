@@ -168,7 +168,13 @@
     bodyEls.status.textContent = status + (currentItem ? ` · ${currentItem.status}` : "");
     bodyEls.progress.textContent = `${done} / ${total}`;
     bodyEls.barFill.style.width = pct + "%";
-    bodyEls.current.textContent = currentItem ? `${currentItem.mode || "?"} #${(queue || []).indexOf(currentItem) + 1}` : "—";
+    if (currentItem) {
+      const ratio = currentItem.aspectRatio ? ` · ${currentItem.aspectRatio}` : "";
+      const cnt = currentItem.outputCount && currentItem.outputCount > 1 ? ` · x${currentItem.outputCount}` : "";
+      bodyEls.current.textContent = `${currentItem.mode || "?"}${ratio}${cnt} · #${(queue || []).indexOf(currentItem) + 1}`;
+    } else {
+      bodyEls.current.textContent = "—";
+    }
     bodyEls.prompt.textContent = currentItem ? trim(currentItem.prompt, 240) : "—";
     if (lastLog) bodyEls.log.textContent = lastLog;
 

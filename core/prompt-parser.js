@@ -25,12 +25,17 @@
     return "id-" + Math.random().toString(36).slice(2, 10) + "-" + Date.now().toString(36);
   }
 
-  function buildItems(prompts, mode) {
+  function buildItems(prompts, opts) {
     const now = Date.now();
+    // Backward-compat: buildItems(prompts, "image"|"video") — promote to opts
+    if (typeof opts === "string") opts = { mode: opts };
+    const o = opts || {};
     return prompts.map((p) => ({
       id: uuid(),
       prompt: p,
-      mode: mode || "image",
+      mode: o.mode || "image",
+      aspectRatio: o.aspectRatio || "16:9",
+      outputCount: parseInt(o.outputCount, 10) || 1,
       status: "pending",
       attempts: 0,
       createdAt: now,
