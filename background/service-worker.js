@@ -432,6 +432,19 @@ async function skipCurrent() {
   const run = await Storage.getRunState();
   const id = run && run.currentId;
   if (!id) return { ok: false, error: "no current item" };
+  // Race guard: the run loop may have already marked the item terminal
+  // (completed/failed/skipped) but not yet cleared currentId (line ~322).
+  // If we blindly write 'skipped' here we'd overwrite a real completion
+  // and confuse the queue UI even though the download already happened.
+  // In that case we just no-op the status update — the loop is about to
+  // advance anyway, and there's nothing to abort in the content script.
+  const queue = await Storage.getQueue();
+  const cur = queue.find((q) => q.id === id);
+  const terminal = cur && /^(completed|failed|skipped)$/.test(cur.status);
+  if (terminal) {
+    Log.log("skip ignored (item already terminal)", { id, status: cur.status });
+    return { ok: false, error: `item already ${cur.status}` };
+  }
   await Storage.updateItem(id, { status: "skipped", error: "user skipped" });
   await Storage.setRunState({ skipRequestedFor: id });
   if (lastFlowTabId) {
