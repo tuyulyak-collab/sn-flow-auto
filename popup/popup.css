@@ -77,6 +77,14 @@ html, body {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 8px; gap: 12px;
 }
+.snf-grid3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.snf-col { display: flex; flex-direction: column; min-width: 0; }
+.snf-fullw { width: 100%; }
 .snf-label {
   font-size: 11px; color: #6b4242; text-transform: uppercase; letter-spacing: 0.5px;
   font-weight: 700; display: block; margin-bottom: 4px;

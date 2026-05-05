@@ -19,12 +19,33 @@
   </header>
 
   <section class="snf-card">
-    <div class="snf-row">
-      <label class="snf-label" for="snf-mode">Mode</label>
-      <select id="snf-mode" class="snf-select">
-        <option value="image">Image</option>
-        <option value="video">Video</option>
-      </select>
+    <div class="snf-grid3">
+      <div class="snf-col">
+        <label class="snf-label" for="snf-mode">Mode</label>
+        <select id="snf-mode" class="snf-select snf-fullw">
+          <option value="image">Image</option>
+          <option value="video">Video</option>
+        </select>
+      </div>
+      <div class="snf-col">
+        <label class="snf-label" for="snf-aspect">Aspect ratio</label>
+        <select id="snf-aspect" class="snf-select snf-fullw">
+          <option value="16:9">16:9 — Landscape</option>
+          <option value="4:3">4:3</option>
+          <option value="1:1">1:1 — Square</option>
+          <option value="3:4">3:4</option>
+          <option value="9:16">9:16 — Portrait</option>
+        </select>
+      </div>
+      <div class="snf-col">
+        <label class="snf-label" for="snf-count">Output</label>
+        <select id="snf-count" class="snf-select snf-fullw">
+          <option value="1">x1</option>
+          <option value="2">x2</option>
+          <option value="3">x3</option>
+          <option value="4">x4</option>
+        </select>
+      </div>
     </div>
 
     <label class="snf-label" for="snf-prompts">Prompts (one per line)</label>

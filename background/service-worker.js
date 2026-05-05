@@ -73,6 +73,7 @@ async function ensureContentInjected(tabId) {
         "core/retry.js",
         "core/filename-template.js",
         "content/flow-detector.js",
+        "content/flow-settings.js",
         "content/prompt-input.js",
         "content/generate-button.js",
         "content/result-watcher.js",

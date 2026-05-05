@@ -32,6 +32,8 @@
 
   const DEFAULT_SETTINGS = {
     mode: "image",
+    aspectRatio: "16:9",  // 16:9 / 4:3 / 1:1 / 3:4 / 9:16
+    outputCount: 1,        // 1..4 — Flow's "x1" / "x2" / "x3" / "x4" tabs
     autoStart: false,
     waitTimeoutMs: 5 * 60 * 1000, // 5 min per prompt for video
     perItemDelayMs: 1500,

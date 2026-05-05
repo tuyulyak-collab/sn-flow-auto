@@ -36,7 +36,9 @@
       tdPrompt.textContent = trim(item.prompt, 80);
 
       const tdMode = document.createElement("td");
-      tdMode.textContent = item.mode || "image";
+      const ratio = item.aspectRatio ? ` · ${item.aspectRatio}` : "";
+      const count = item.outputCount && item.outputCount > 1 ? ` · x${item.outputCount}` : "";
+      tdMode.textContent = `${item.mode || "image"}${ratio}${count}`;
 
       const tdStatus = document.createElement("td");
       tdStatus.appendChild(statusTag(item.status));
@@ -121,35 +123,50 @@
     renderQueue(queue);
     renderRunState(run);
     if (els.mode.value !== settings.mode) els.mode.value = settings.mode;
+    if (els.aspect && settings.aspectRatio && els.aspect.value !== settings.aspectRatio) {
+      els.aspect.value = settings.aspectRatio;
+    }
+    if (els.count && settings.outputCount && els.count.value !== String(settings.outputCount)) {
+      els.count.value = String(settings.outputCount);
+    }
     renderLogs(all[Storage.KEYS.LOGS] || []);
+  }
+
+  function currentBuildOpts() {
+    return {
+      mode: els.mode.value,
+      aspectRatio: els.aspect ? els.aspect.value : "16:9",
+      outputCount: els.count ? parseInt(els.count.value, 10) || 1 : 1,
+    };
   }
 
   // ---- queue mutations ----
   async function addPrompts() {
     const text = els.prompts.value;
-    const mode = els.mode.value;
+    const opts = currentBuildOpts();
     const parsed = Parser.parsePrompts(text);
     if (!parsed.length) {
       els.importInfo.textContent = "no prompts";
       return;
     }
-    const items = Parser.buildItems(parsed, mode);
+    const items = Parser.buildItems(parsed, opts);
     const cur = await Storage.getQueue();
     await Storage.setQueue(cur.concat(items));
     els.prompts.value = "";
     els.importInfo.textContent = `+${items.length} added`;
-    await Storage.setSettings({ mode });
+    await Storage.setSettings(opts);
     await refresh();
   }
 
   async function importTxt(file) {
     const text = await file.text();
     const parsed = Parser.parsePrompts(text);
-    const mode = els.mode.value;
-    const items = Parser.buildItems(parsed, mode);
+    const opts = currentBuildOpts();
+    const items = Parser.buildItems(parsed, opts);
     const cur = await Storage.getQueue();
     await Storage.setQueue(cur.concat(items));
     els.importInfo.textContent = `+${items.length} from ${file.name}`;
+    await Storage.setSettings(opts);
     await refresh();
   }
 
@@ -202,6 +219,16 @@
     els.mode.addEventListener("change", async () => {
       await Storage.setSettings({ mode: els.mode.value });
     });
+    if (els.aspect) {
+      els.aspect.addEventListener("change", async () => {
+        await Storage.setSettings({ aspectRatio: els.aspect.value });
+      });
+    }
+    if (els.count) {
+      els.count.addEventListener("change", async () => {
+        await Storage.setSettings({ outputCount: parseInt(els.count.value, 10) || 1 });
+      });
+    }
 
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local") return;
@@ -214,6 +241,8 @@
   function init() {
     Object.assign(els, {
       mode: $("snf-mode"),
+      aspect: $("snf-aspect"),
+      count: $("snf-count"),
       prompts: $("snf-prompts"),
       file: $("snf-file"),
       importInfo: $("snf-import-info"),
