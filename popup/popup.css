@@ -319,14 +319,38 @@ html, body {
 
 /* Chain rows in the queue table — slight indentation + a leading ↳ glyph
  * to show the parent → child relationship. The glyph is added in JS as a
- * span.snf-chain-arrow on the prompt cell. */
-.snf-chain-row .snf-prompt-cell {
-  padding-left: 16px;
-}
+ * span.snf-chain-arrow on the prompt cell. The actual indent + left
+ * border is below in the .snf-chain-parent-row / .snf-chain-row rules. */
 .snf-chain-arrow {
   display: inline-block;
   margin-right: 6px;
   color: #b6322f;
   font-weight: 700;
   opacity: 0.85;
+}
+
+/* Small "from #N" linkage badge appended to chain video rows so users can
+ * see at a glance which image step feeds which video step. */
+.snf-chain-parent-link {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(240, 80, 83, 0.10);
+  color: #8a2624;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+}
+
+/* Chain image (parent) rows get a faint left border so the parent + its
+ * children read as a visual group in the queue table. */
+.snf-chain-parent-row .snf-prompt-cell {
+  border-left: 3px solid rgba(240, 80, 83, 0.35);
+  padding-left: 8px;
+}
+.snf-chain-row .snf-prompt-cell {
+  border-left: 3px solid rgba(240, 80, 83, 0.20);
+  padding-left: 16px;
 }

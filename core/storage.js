@@ -78,10 +78,12 @@
     //   "same"   — video step reuses the image prompt verbatim. Default.
     //   "suffix" — append a fixed suffix to the prompt for the video step
     //              (uses chainPromptSuffix below).
-    //   "custom" — user supplies a fully separate prompt per chain (UI for
-    //              this is added in PR #8; treated as "same" for now).
+    //   "custom" — user supplies a custom video prompt template
+    //              (uses chainPromptCustom below). Supports `{prompt}` as
+    //              a placeholder for the image prompt.
     chainPromptSource: "same",
     chainPromptSuffix: "",
+    chainPromptCustom: "",
     // chainRunOrder
     //   "interleave" — image1 → video1 → image2 → video2 (default; finish
     //                  each prompt's chain before starting the next).

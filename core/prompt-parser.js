@@ -26,15 +26,23 @@
   }
 
   // Build the prompt that the chained video step should send to Flow.
-  // Default ("same") reuses the image prompt verbatim. "suffix" appends a
-  // small steering phrase. "custom" is reserved for PR #8 and currently
-  // behaves like "same".
+  //   "same"   → reuse the image prompt verbatim.
+  //   "suffix" → append `chainPromptSuffix` to the image prompt with a
+  //              comma-or-space separator.
+  //   "custom" → use `chainPromptCustom` verbatim. Supports `{prompt}` as
+  //              a placeholder for the image prompt. If `chainPromptCustom`
+  //              is empty, falls back to "same".
   function buildVideoPrompt(imagePrompt, opts) {
     const source = (opts && opts.chainPromptSource) || "same";
     const suffix = (opts && opts.chainPromptSuffix) || "";
+    const custom = (opts && opts.chainPromptCustom) || "";
     if (source === "suffix" && suffix) {
       const sep = /[.!?]$/.test(imagePrompt.trim()) ? " " : ", ";
       return imagePrompt + sep + suffix;
+    }
+    if (source === "custom" && custom.trim()) {
+      // Replace {prompt} (case-insensitive) with the image prompt.
+      return custom.replace(/\{prompt\}/gi, imagePrompt);
     }
     return imagePrompt;
   }
