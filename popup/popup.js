@@ -522,9 +522,9 @@
     if (els.aggressive) {
       els.aggressive.addEventListener("change", async () => {
         if (els.aggressive.checked && !confirm(
-          "Aggressive mode collapses ALL delays to 0.\n\n" +
-          "Flow may rate-limit or temporarily block this account if it detects automation.\n\n" +
-          "Use only for testing. Continue?"
+          "Fast mode removes all delays between prompts.\n\n" +
+          "This is not recommended — it may cause more errors or hit usage limits.\n\n" +
+          "Continue?"
         )) {
           els.aggressive.checked = false;
           return;
