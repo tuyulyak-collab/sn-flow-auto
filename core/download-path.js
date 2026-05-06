@@ -174,23 +174,23 @@
     if (typeof raw !== "string") raw = "";
     const v = raw.trim();
     if (!v) {
-      return { ok: false, error: "File name format is invalid. Please remove special characters." };
+      return { ok: false, error: "File name has unsupported characters." };
     }
     if (v.length > MAX_FILENAME_LEN) {
-      return { ok: false, error: "File name format is invalid. Please remove special characters." };
+      return { ok: false, error: "File name has unsupported characters." };
     }
     // Strip recognised tokens before checking forbidden chars, so users can
     // still write {random5} etc. without false positives.
     const stripped = v.replace(/\{(random5|ddmmyyyy|mode|index|promptSlug)\}/g, "");
     if (FORBIDDEN_FILE_TEST.test(stripped)) {
-      return { ok: false, error: "File name format is invalid. Please remove special characters." };
+      return { ok: false, error: "File name has unsupported characters." };
     }
     // No path separators in a filename
     if (/[\/\\]/.test(stripped)) {
-      return { ok: false, error: "File name format is invalid. Please remove special characters." };
+      return { ok: false, error: "File name has unsupported characters." };
     }
     if (/\.\./.test(stripped)) {
-      return { ok: false, error: "File name format is invalid. Please remove special characters." };
+      return { ok: false, error: "File name has unsupported characters." };
     }
     return { ok: true, value: v };
   }
@@ -202,12 +202,12 @@
    */
   function validateOutputFolder(raw) {
     if (raw == null) raw = "";
-    if (typeof raw !== "string") return { ok: false, error: "Save folder must be inside Downloads." };
+    if (typeof raw !== "string") return { ok: false, error: "Folder must stay inside Downloads." };
     const trimmed = raw.trim();
     if (!trimmed) return { ok: true, value: "" };
 
     if (isAbsolutePath(trimmed)) {
-      return { ok: false, error: "Save folder must be inside Downloads." };
+      return { ok: false, error: "Folder must stay inside Downloads." };
     }
 
     // Normalise backslashes → forward slashes, collapse duplicate slashes,

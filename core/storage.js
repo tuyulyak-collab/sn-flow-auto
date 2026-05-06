@@ -101,10 +101,17 @@
     // the per-item wait timeout for chained video items only.
     chainVideoTimeoutMs: 8 * 60 * 1000, // 8 min
 
-    // ---- Download Settings (PR #15) ----
+    // ---- Download Settings (PR #15 + PR #16 UX polish) ----
     // User-configurable download path: a relative subfolder inside Chrome's
     // Downloads directory + a filename template with token shortcuts.
     // See core/download-path.js for sanitization + token expansion.
+    //
+    // PR #16 UX polish: customisation is gated behind two toggles
+    // (customizeFileName / customizeFolder). When a toggle is OFF,
+    // filenameTemplate / outputFolder are forced to their defaults so the
+    // service worker keeps using safe defaults transparently. The user's
+    // last-typed customisations live in *Custom keys so toggling back ON
+    // restores them without data loss.
     //
     // filenameTemplate — body of the saved file name, no extension. Tokens:
     //   {random5}    random 5 alphanumeric chars (default behaviour)
@@ -128,6 +135,18 @@
     // completed download, used by the "Open Last Download" button. Updated
     // by background/service-worker.js after every successful download.
     lastDownloadId: null,
+    // customizeFileName / customizeFolder — toggle state for the Settings
+    // overlay's progressive-disclosure UI. Both default to false so first-
+    // time users get the safe defaults automatically. The popup mirrors
+    // these flags into filenameTemplate / outputFolder before saving.
+    customizeFileName: false,
+    customizeFolder: false,
+    // filenameTemplateCustom / outputFolderCustom — the user's last-typed
+    // customisation values. Preserved across toggle ON/OFF so toggling
+    // Customize File Names back ON restores whatever they had before
+    // without forcing them to retype.
+    filenameTemplateCustom: "SN_flow_{random5}_{ddmmyyyy}",
+    outputFolderCustom: "SN Flow Auto",
   };
 
   function get(keys) {
