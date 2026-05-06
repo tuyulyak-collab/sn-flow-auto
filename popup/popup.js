@@ -190,32 +190,116 @@
     refreshPacerState();
   }
 
-  // Download Settings (PR #15) — sync inputs and live-validate.
+  // Download Settings (PR #15 + PR #16 UX polish) — progressive disclosure.
+  // Defaults always apply when the toggles are OFF; when a toggle is ON we
+  // expose the underlying input and write the user's value to the active
+  // settings keys. Defaults remain SN_flow_{random5}_{ddmmyyyy} / SN Flow Auto.
+  const DEFAULT_FILENAME_TEMPLATE = "SN_flow_{random5}_{ddmmyyyy}";
+  const DEFAULT_OUTPUT_FOLDER = "SN Flow Auto";
+
+  // Validation should not flash red on first popup open. We only show
+  // inline errors once the user has actually interacted with that field
+  // (typed something / blurred), or after they pressed Start with bad
+  // settings. See validateAllForStart() below.
+  const hasInteracted = { filenameTemplate: false, outputFolder: false };
+
   function syncDownloadInputs(settings) {
+    // Toggle states drive which inputs are visible and whether the
+    // active filenameTemplate / outputFolder keys come from the user's
+    // customisation or the safe defaults.
+    const onFile = !!settings.customizeFileName;
+    const onFolder = !!settings.customizeFolder;
+
+    if (els.toggleFilename && els.toggleFilename.checked !== onFile) {
+      els.toggleFilename.checked = onFile;
+    }
+    if (els.toggleFolder && els.toggleFolder.checked !== onFolder) {
+      els.toggleFolder.checked = onFolder;
+    }
+
+    // When customisation is ON, populate the input from the user's saved
+    // customisation; when OFF, reflect the default so an open-and-toggle-ON
+    // shows the user where they're starting from. Don't stomp on the user
+    // mid-edit.
     if (els.filenameTemplate && document.activeElement !== els.filenameTemplate) {
-      const v = settings.filenameTemplate || "SN_flow_{random5}_{ddmmyyyy}";
+      const v = onFile
+        ? (settings.filenameTemplateCustom || settings.filenameTemplate || DEFAULT_FILENAME_TEMPLATE)
+        : DEFAULT_FILENAME_TEMPLATE;
       if (els.filenameTemplate.value !== v) els.filenameTemplate.value = v;
     }
     if (els.outputFolder && document.activeElement !== els.outputFolder) {
-      const v = typeof settings.outputFolder === "string" ? settings.outputFolder : "SN Flow Auto";
+      const v = onFolder
+        ? (typeof settings.outputFolderCustom === "string" ? settings.outputFolderCustom : DEFAULT_OUTPUT_FOLDER)
+        : DEFAULT_OUTPUT_FOLDER;
       if (els.outputFolder.value !== v) els.outputFolder.value = v;
     }
+
+    // Conflict policy lives inside Advanced Download Options now; default
+    // = keep both files (uniquify). Anything that isn't "overwrite" is
+    // treated as keep-both for forward-compat.
     if (els.conflictKeep) {
-      // Default = keep both files (uniquify). Anything that isn't
-      // "overwrite" is treated as keep-both for forward-compat.
       const keep = settings.conflictAction !== "overwrite";
       if (els.conflictKeep.checked !== keep) els.conflictKeep.checked = keep;
     }
+
+    refreshDownloadVisibility(onFile, onFolder);
     refreshFilenamePreview();
+  }
+
+  function refreshDownloadVisibility(onFile, onFolder) {
+    if (els.filenameFields) els.filenameFields.hidden = !onFile;
+    if (els.folderFields) els.folderFields.hidden = !onFolder;
+    if (els.filenameToggleHelper) {
+      els.filenameToggleHelper.hidden = onFile;
+    }
+    if (els.folderToggleHelper) {
+      els.folderToggleHelper.hidden = onFolder;
+    }
+    // Clear any stale errors when the user hides the field again.
+    if (!onFile) {
+      hasInteracted.filenameTemplate = false;
+      setFieldError(els.filenameTemplate, els.filenameError, null);
+    }
+    if (!onFolder) {
+      hasInteracted.outputFolder = false;
+      setFieldError(els.outputFolder, els.folderError, null);
+    }
+  }
+
+  function refreshDefaultPreview() {
+    if (!DownloadPath) return;
+    const sample = DownloadPath.buildDownloadPath({
+      outputFolder: DEFAULT_OUTPUT_FOLDER,
+      filenameTemplate: DEFAULT_FILENAME_TEMPLATE,
+      ext: "png",
+      ctx: { mode: "image", index: 1, prompt: "A cinematic sunrise over Bali" },
+    });
+    // sample looks like "SN Flow Auto/SN_flow_A7K2Q_05052026.png"
+    const slash = sample.lastIndexOf("/");
+    const folder = slash >= 0 ? sample.slice(0, slash) : "";
+    const name = slash >= 0 ? sample.slice(slash + 1) : sample;
+    if (els.defaultPreviewName) els.defaultPreviewName.textContent = name;
+    if (els.defaultPreviewFolder) {
+      els.defaultPreviewFolder.textContent = folder ? `Downloads/${folder}` : "Downloads";
+    }
   }
 
   function refreshFilenamePreview() {
     if (!els.filenamePreview || !DownloadPath) return;
-    const tplRaw = (els.filenameTemplate && els.filenameTemplate.value) || "";
-    const folderRaw = (els.outputFolder && els.outputFolder.value) || "";
+    // Only show the live preview when the user is actively customising.
+    const onFile = els.toggleFilename ? els.toggleFilename.checked : false;
+    const onFolder = els.toggleFolder ? els.toggleFolder.checked : false;
+    if (!onFile && !onFolder) {
+      els.filenamePreview.hidden = true;
+      els.filenamePreview.textContent = "";
+      return;
+    }
+    const tplRaw = onFile && els.filenameTemplate ? els.filenameTemplate.value : DEFAULT_FILENAME_TEMPLATE;
+    const folderRaw = onFolder && els.outputFolder ? els.outputFolder.value : DEFAULT_OUTPUT_FOLDER;
     const tplCheck = DownloadPath.validateFilenameTemplate(tplRaw);
     const folderCheck = DownloadPath.validateOutputFolder(folderRaw);
     if (!tplCheck.ok || !folderCheck.ok) {
+      els.filenamePreview.hidden = true;
       els.filenamePreview.textContent = "";
       return;
     }
@@ -225,6 +309,7 @@
       ext: "png",
       ctx: { mode: "image", index: 1, prompt: "A cinematic sunrise over Bali" },
     });
+    els.filenamePreview.hidden = false;
     els.filenamePreview.textContent = `Preview: Downloads/${sample}`;
   }
 
@@ -453,7 +538,21 @@
 
   function bind() {
     els.add.addEventListener("click", addPrompts);
-    els.start.addEventListener("click", async () => { await sendCmd("START"); refresh(); });
+    els.start.addEventListener("click", async () => {
+      // PR #16: surface inline errors when the user presses Start with bad
+      // download settings, then bail out so we don't queue against broken
+      // sanitisation. Defaults pass trivially.
+      const validate = self.SNFlowValidateDownloadSettingsForStart;
+      if (typeof validate === "function") {
+        const ok = await validate();
+        if (!ok) {
+          if (els.settingsPanel && els.settingsPanel.hidden) openSettings();
+          return;
+        }
+      }
+      await sendCmd("START");
+      refresh();
+    });
     els.pause.addEventListener("click", async () => { await sendCmd("PAUSE"); refresh(); });
     els.resume.addEventListener("click", async () => { await sendCmd("RESUME"); refresh(); });
     els.stop.addEventListener("click", async () => {
@@ -604,16 +703,28 @@
   function bindDownloadSettings() {
     if (!DownloadPath) return;
 
+    // Lazy validation: only show inline errors after the user has actually
+    // interacted with the field, or after they pressed Start with bad
+    // settings (handled by validateDownloadSettingsForStart below).
     const validateAndSaveFilename = async () => {
       if (!els.filenameTemplate) return;
       const raw = els.filenameTemplate.value;
       const result = DownloadPath.validateFilenameTemplate(raw);
       if (!result.ok) {
-        setFieldError(els.filenameTemplate, els.filenameError, result.error);
+        if (hasInteracted.filenameTemplate) {
+          setFieldError(els.filenameTemplate, els.filenameError, result.error);
+        }
+        // Persist whatever they typed to *Custom so toggling preserves it,
+        // but don't write the broken value into the active filenameTemplate
+        // key — keep the SW on the last known-good template.
+        await Storage.setSettings({ filenameTemplateCustom: raw });
         return;
       }
       setFieldError(els.filenameTemplate, els.filenameError, null);
-      await Storage.setSettings({ filenameTemplate: result.value });
+      await Storage.setSettings({
+        filenameTemplate: result.value,
+        filenameTemplateCustom: result.value,
+      });
       refreshFilenamePreview();
     };
 
@@ -622,21 +733,99 @@
       const raw = els.outputFolder.value;
       const result = DownloadPath.validateOutputFolder(raw);
       if (!result.ok) {
-        setFieldError(els.outputFolder, els.folderError, result.error);
+        if (hasInteracted.outputFolder) {
+          setFieldError(els.outputFolder, els.folderError, result.error);
+        }
+        await Storage.setSettings({ outputFolderCustom: raw });
         return;
       }
       setFieldError(els.outputFolder, els.folderError, null);
-      await Storage.setSettings({ outputFolder: result.value });
+      await Storage.setSettings({
+        outputFolder: result.value,
+        outputFolderCustom: result.value,
+      });
       refreshFilenamePreview();
     };
 
+    // Toggle handlers — flip customise* flags and mirror the active
+    // template/folder keys to either the user's last customisation or the
+    // safe defaults so the SW stays on whichever the user just chose.
+    //
+    // If the saved custom value is invalid (e.g. user typed "bad<file>?"
+    // and toggled OFF before fixing it), keep the active key on the safe
+    // default so the SW never sees a broken value, surface the inline
+    // error so the user notices, and preserve the bad text in the input
+    // so they can fix it without retyping.
+    if (els.toggleFilename) {
+      els.toggleFilename.addEventListener("change", async (e) => {
+        const on = !!e.target.checked;
+        const cur = await Storage.getSettings();
+        if (on) {
+          const raw = cur.filenameTemplateCustom || DEFAULT_FILENAME_TEMPLATE;
+          const check = DownloadPath.validateFilenameTemplate(raw);
+          await Storage.setSettings({
+            customizeFileName: true,
+            filenameTemplate: check.ok ? check.value : DEFAULT_FILENAME_TEMPLATE,
+            filenameTemplateCustom: raw,
+          });
+          if (!check.ok) {
+            hasInteracted.filenameTemplate = true;
+            setFieldError(els.filenameTemplate, els.filenameError, check.error);
+          }
+        } else {
+          await Storage.setSettings({
+            customizeFileName: false,
+            filenameTemplate: DEFAULT_FILENAME_TEMPLATE,
+            // preserve filenameTemplateCustom for restore on next toggle ON
+          });
+        }
+        // refresh() is already wired to chrome.storage.onChanged, but
+        // call it directly to make the toggle feel instant.
+        refresh();
+      });
+    }
+    if (els.toggleFolder) {
+      els.toggleFolder.addEventListener("change", async (e) => {
+        const on = !!e.target.checked;
+        const cur = await Storage.getSettings();
+        if (on) {
+          const raw = typeof cur.outputFolderCustom === "string" ? cur.outputFolderCustom : DEFAULT_OUTPUT_FOLDER;
+          const check = DownloadPath.validateOutputFolder(raw);
+          await Storage.setSettings({
+            customizeFolder: true,
+            outputFolder: check.ok ? check.value : DEFAULT_OUTPUT_FOLDER,
+            outputFolderCustom: raw,
+          });
+          if (!check.ok) {
+            hasInteracted.outputFolder = true;
+            setFieldError(els.outputFolder, els.folderError, check.error);
+          }
+        } else {
+          await Storage.setSettings({
+            customizeFolder: false,
+            outputFolder: DEFAULT_OUTPUT_FOLDER,
+          });
+        }
+        refresh();
+      });
+    }
+
     if (els.filenameTemplate) {
-      els.filenameTemplate.addEventListener("input", refreshFilenamePreview);
+      // Mark interacted on first input/change so subsequent invalid edits
+      // surface the inline error. We do NOT mark interacted on focus —
+      // tabbing into the field shouldn't trip a red error.
+      els.filenameTemplate.addEventListener("input", () => {
+        hasInteracted.filenameTemplate = true;
+        refreshFilenamePreview();
+      });
       els.filenameTemplate.addEventListener("change", validateAndSaveFilename);
       els.filenameTemplate.addEventListener("blur", validateAndSaveFilename);
     }
     if (els.outputFolder) {
-      els.outputFolder.addEventListener("input", refreshFilenamePreview);
+      els.outputFolder.addEventListener("input", () => {
+        hasInteracted.outputFolder = true;
+        refreshFilenamePreview();
+      });
       els.outputFolder.addEventListener("change", validateAndSaveFolder);
       els.outputFolder.addEventListener("blur", validateAndSaveFolder);
     }
@@ -668,6 +857,34 @@
       });
     }
   }
+
+  // Called from the Start button handler — surfaces inline errors if the
+  // user is currently customising and has bad settings, so they don't try
+  // to start a batch with invalid filename / folder values.
+  async function validateDownloadSettingsForStart() {
+    if (!DownloadPath) return true;
+    const settings = await Storage.getSettings();
+    let ok = true;
+    if (settings.customizeFileName && els.filenameTemplate) {
+      const r = DownloadPath.validateFilenameTemplate(els.filenameTemplate.value);
+      if (!r.ok) {
+        hasInteracted.filenameTemplate = true;
+        setFieldError(els.filenameTemplate, els.filenameError, r.error);
+        ok = false;
+      }
+    }
+    if (settings.customizeFolder && els.outputFolder) {
+      const r = DownloadPath.validateOutputFolder(els.outputFolder.value);
+      if (!r.ok) {
+        hasInteracted.outputFolder = true;
+        setFieldError(els.outputFolder, els.folderError, r.error);
+        ok = false;
+      }
+    }
+    return ok;
+  }
+  // expose to start handler if present elsewhere; harmless otherwise.
+  self.SNFlowValidateDownloadSettingsForStart = validateDownloadSettingsForStart;
 
   // ---- header actions (gear / floating) ----
   // Gear: toggle the in-popup Settings overlay (slide-in panel that hosts
@@ -788,7 +1005,15 @@
       settingsPanel: $("snf-settings-panel"),
       settingsBack: $("snf-settings-back"),
       settingsClose: $("snf-settings-close"),
-      // download settings (PR #15)
+      // download settings (PR #15 + PR #16 UX polish — progressive disclosure)
+      defaultPreviewName: $("snf-default-preview-name"),
+      defaultPreviewFolder: $("snf-default-preview-folder"),
+      toggleFilename: $("snf-toggle-filename"),
+      toggleFolder: $("snf-toggle-folder"),
+      filenameToggleHelper: $("snf-filename-toggle-helper"),
+      folderToggleHelper: $("snf-folder-toggle-helper"),
+      filenameFields: $("snf-filename-fields"),
+      folderFields: $("snf-folder-fields"),
       filenameTemplate: $("snf-filename-template"),
       filenameError: $("snf-filename-error"),
       filenamePreview: $("snf-filename-preview"),
@@ -800,6 +1025,7 @@
     });
     bind();
     bindHeaderActions();
+    refreshDefaultPreview();
     refresh();
     // Refresh pacer state every 3 s while popup is open
     setInterval(refreshPacerState, 3000);

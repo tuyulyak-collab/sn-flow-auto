@@ -189,29 +189,156 @@ html, body {
 .snf-pacing-card .snf-card-head { margin-bottom: 6px; }
 .snf-pacing-toggles { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 
-/* Download Settings card (PR #15) — lives inside the Settings overlay.
- * Matches the warm cream / coral / mint palette of the rest of the popup
- * and stays beginner-friendly: short helper text under each control,
- * inline error messages in the brand red, gradient-tinted token chips. */
-.snf-download-card .snf-card-head { margin-bottom: 6px; }
-.snf-download-card .snf-col + .snf-col { margin-top: 12px; }
-.snf-helper { margin: 4px 0 0 0; font-size: 11px; color: #6b4242; }
-.snf-token-helper {
-  margin-top: 8px;
-  padding: 8px 10px;
-  background: linear-gradient(135deg, rgba(225, 238, 195, 0.55) 0%, rgba(255, 244, 232, 0.85) 100%);
-  border: 1px solid rgba(240, 80, 83, 0.12);
-  border-radius: 10px;
+/* Download Settings card (PR #16 UX polish) — progressive disclosure.
+ * Default state shows a preview + two switches; customisation panels and
+ * the Advanced collapse are hidden until the user opts in. The colour
+ * system stays consistent with the rest of the popup (cream / coral /
+ * mint) and uses the same primary gradient for emphasis. */
+.snf-download-card .snf-card-head { margin-bottom: 10px; }
+.snf-download-card .snf-card-head .snf-meta { line-height: 1.5; }
+
+/* Default preview block — always visible so the user can see what the
+ * defaults will produce before touching anything. */
+.snf-default-preview {
+  margin: 14px 0 4px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, rgba(225, 238, 195, 0.45) 0%, rgba(255, 244, 232, 0.85) 100%);
+  border: 1px solid rgba(240, 80, 83, 0.16);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
-.snf-token-helper-title {
-  margin: 0 0 4px 0;
+.snf-default-preview-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.snf-default-preview-label {
   font-size: 10px;
   font-weight: 800;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: #4a1c1c;
+  letter-spacing: 0.6px;
+  color: #6b4242;
+  flex-shrink: 0;
+  min-width: 100px;
 }
-.snf-token-list {
+.snf-default-preview-value {
+  display: inline-block;
+  padding: 3px 9px;
+  background: #fff;
+  border: 1px solid rgba(240, 80, 83, 0.24);
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: #4a1c1c;
+  word-break: break-all;
+}
+
+/* Toggle row — hosts a switch + helper text + (when on) the input panel. */
+.snf-toggle-row {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(240, 80, 83, 0.10);
+}
+.snf-toggle-row:first-of-type { border-top: none; padding-top: 0; }
+
+/* Native-looking switch built on a hidden checkbox + styled track. */
+.snf-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+.snf-switch input { position: absolute; opacity: 0; pointer-events: none; }
+.snf-switch-track {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  background: #d8c9c9;
+  border-radius: 999px;
+  transition: background 0.2s ease;
+  flex-shrink: 0;
+}
+.snf-switch-track::after {
+  content: "";
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 16px; height: 16px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+  transition: transform 0.2s ease;
+}
+.snf-switch input:checked + .snf-switch-track {
+  background: linear-gradient(135deg, #e1eec3 0%, #f05053 100%);
+}
+.snf-switch input:checked + .snf-switch-track::after { transform: translateX(16px); }
+.snf-switch input:focus-visible + .snf-switch-track {
+  box-shadow: 0 0 0 3px rgba(240, 80, 83, 0.25);
+}
+.snf-switch-text { font-size: 13px; font-weight: 700; color: #2b1a1a; }
+
+.snf-toggle-helper {
+  margin: 6px 0 0 46px;
+  font-size: 11px;
+  color: #6b4242;
+}
+
+.snf-toggle-fields {
+  margin-top: 10px;
+  padding: 12px 14px;
+  background: rgba(255, 244, 232, 0.55);
+  border: 1px solid rgba(240, 80, 83, 0.10);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+}
+.snf-toggle-fields[hidden] { display: none; }
+.snf-toggle-fields .snf-label.snf-toggle-label {
+  margin-bottom: 6px;
+}
+
+.snf-helper { margin: 4px 0 0 0; font-size: 11px; color: #6b4242; }
+
+/* Compact, expandable shortcuts list (collapsed by default). */
+.snf-shortcuts {
+  margin-top: 8px;
+  border: 1px solid rgba(240, 80, 83, 0.18);
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(225, 238, 195, 0.40) 0%, rgba(255, 244, 232, 0.80) 100%);
+  overflow: hidden;
+}
+.snf-shortcuts > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 7px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #4a1c1c;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.snf-shortcuts > summary::-webkit-details-marker { display: none; }
+.snf-shortcuts > summary::before {
+  content: "›";
+  display: inline-block;
+  transition: transform 0.18s ease;
+  font-size: 14px;
+  line-height: 1;
+}
+.snf-shortcuts[open] > summary::before { transform: rotate(90deg); }
+.snf-shortcuts > .snf-token-list {
+  padding: 4px 12px 10px;
+}
+
+/* Token + folder example lists share a clean, compact style. */
+.snf-token-list,
+.snf-folder-examples {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -219,9 +346,11 @@ html, body {
   color: #4a2b2b;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
 }
-.snf-token-list code {
+.snf-folder-examples { margin-top: 8px; }
+.snf-token-list code,
+.snf-folder-examples code {
   display: inline-block;
   padding: 1px 6px;
   margin-right: 4px;
@@ -231,22 +360,20 @@ html, body {
   font-size: 11px;
   color: #4a1c1c;
 }
-.snf-folder-warn {
+
+.snf-folder-warn-mini {
   margin: 8px 0 0 0;
-  padding: 8px 10px;
-  background: rgba(240, 80, 83, 0.08);
-  border: 1px solid rgba(240, 80, 83, 0.22);
-  border-radius: 10px;
   font-size: 11px;
   color: #8a1a1a;
 }
+
 .snf-error {
-  margin: 6px 0 0 0;
+  margin: 8px 0 0 0;
   color: #b6322f;
   font-weight: 700;
 }
 .snf-preview {
-  margin: 6px 0 0 0;
+  margin: 8px 0 0 0;
   padding: 6px 10px;
   background: #fff;
   border: 1px dashed rgba(240, 80, 83, 0.28);
@@ -261,13 +388,48 @@ html, body {
   background: #fff5f3 !important;
   box-shadow: 0 0 0 3px rgba(182, 50, 47, 0.12) !important;
 }
-.snf-download-actions { flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-.snf-download-actions-helper {
-  margin: 6px 0 0 0;
-  font-size: 11px;
-  color: #6b4242;
-  line-height: 1.5;
+
+/* Advanced Download Options — collapsed by default. */
+.snf-advanced {
+  margin-top: 18px;
+  border: 1px solid rgba(240, 80, 83, 0.14);
+  border-radius: 12px;
+  background: rgba(255, 244, 232, 0.45);
+  overflow: hidden;
 }
+.snf-advanced > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 10px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #4a1c1c;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.snf-advanced > summary::-webkit-details-marker { display: none; }
+.snf-advanced > summary::before {
+  content: "›";
+  display: inline-block;
+  transition: transform 0.18s ease;
+  font-size: 16px;
+  line-height: 1;
+}
+.snf-advanced[open] > summary::before { transform: rotate(90deg); }
+.snf-advanced-body {
+  padding: 4px 14px 14px;
+}
+.snf-advanced-helper { margin-left: 28px; }
+
+.snf-download-actions {
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(240, 80, 83, 0.10);
+}
+
 .snf-check {
   display: flex; align-items: flex-start; gap: 8px;
   font-size: 12px; color: #2b1a1a;

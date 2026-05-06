@@ -160,73 +160,107 @@
 
     <div class="snf-settings-body">
       <!--
-        Download Settings (PR #15). Lives inside the Settings overlay so the
-        main popup stays uncluttered. Storage keys: filenameTemplate,
-        outputFolder, conflictAction. Sanitization + token expansion is in
-        core/download-path.js.
+        Download Settings (PR #16 UX polish — progressive disclosure).
+        Default state shows only a preview block and two toggles; the
+        underlying filename template / output folder / conflict policy are
+        all kept on safe defaults via core/storage.js. Customisation
+        controls only appear when the user explicitly opts in.
       -->
       <section class="snf-card snf-download-card">
         <div class="snf-card-head">
           <h2>Download Settings</h2>
-          <span class="snf-meta">Choose how SN Flow Auto names and organizes downloaded files.</span>
+          <span class="snf-meta">SN Flow Auto will automatically name and save generated files for you.</span>
         </div>
 
-        <div class="snf-col">
-          <label class="snf-label" for="snf-filename-template">File Name Format</label>
-          <input id="snf-filename-template" class="snf-input snf-fullw" type="text"
-            placeholder="SN_flow_{random5}_{ddmmyyyy}" autocomplete="off" spellcheck="false" />
-          <p class="snf-meta snf-helper">Choose the default name pattern for downloaded files.</p>
-          <div class="snf-token-helper">
-            <p class="snf-token-helper-title">Available shortcuts:</p>
-            <ul class="snf-token-list">
-              <li><code>{random5}</code> = random 5 letters/numbers</li>
-              <li><code>{ddmmyyyy}</code> = today’s date</li>
-              <li><code>{mode}</code> = image, video, or chain</li>
-              <li><code>{index}</code> = queue number</li>
-              <li><code>{promptSlug}</code> = short prompt text</li>
-            </ul>
+        <!-- Default preview block. Visible at all times so users see the
+             default file-name + folder behaviour even if they never open
+             any of the toggles below. Generated values are populated by
+             popup.js (token-expanded sample). -->
+        <div class="snf-default-preview">
+          <div class="snf-default-preview-row">
+            <span class="snf-default-preview-label">Example file name</span>
+            <code id="snf-default-preview-name" class="snf-default-preview-value">SN_flow_A7K2Q_05052026.png</code>
           </div>
-          <p id="snf-filename-error" class="snf-meta snf-error" hidden></p>
-          <p id="snf-filename-preview" class="snf-meta snf-preview"></p>
+          <div class="snf-default-preview-row">
+            <span class="snf-default-preview-label">Saved in</span>
+            <code id="snf-default-preview-folder" class="snf-default-preview-value">Downloads/SN Flow Auto</code>
+          </div>
         </div>
 
-        <div class="snf-col snf-folder-row">
-          <label class="snf-label" for="snf-output-folder">Save Inside Downloads Folder</label>
-          <input id="snf-output-folder" class="snf-input snf-fullw" type="text"
-            placeholder="SN Flow Auto" autocomplete="off" spellcheck="false" />
-          <p class="snf-meta snf-helper">Files will be saved inside your Chrome Downloads folder.</p>
-          <div class="snf-token-helper">
-            <p class="snf-token-helper-title">Examples:</p>
-            <ul class="snf-token-list">
+        <!-- Customize File Names toggle (OFF by default). -->
+        <div class="snf-toggle-row">
+          <label class="snf-switch">
+            <input id="snf-toggle-filename" type="checkbox" />
+            <span class="snf-switch-track" aria-hidden="true"></span>
+            <span class="snf-switch-text">Customize File Names</span>
+          </label>
+          <p id="snf-filename-toggle-helper" class="snf-toggle-helper">Uses the default name format automatically.</p>
+
+          <!-- Inputs only appear when toggle is ON. -->
+          <div id="snf-filename-fields" class="snf-toggle-fields" hidden>
+            <label class="snf-label snf-toggle-label" for="snf-filename-template">File Name Format</label>
+            <input id="snf-filename-template" class="snf-input snf-fullw" type="text"
+              placeholder="SN_flow_{random5}_{ddmmyyyy}" autocomplete="off" spellcheck="false" />
+            <p class="snf-meta snf-helper">Use shortcuts if you want dynamic file names.</p>
+            <details class="snf-shortcuts">
+              <summary>Show available shortcuts</summary>
+              <ul class="snf-token-list">
+                <li><code>{random5}</code> = random 5 letters/numbers</li>
+                <li><code>{ddmmyyyy}</code> = today’s date</li>
+                <li><code>{mode}</code> = image, video, or chain</li>
+                <li><code>{index}</code> = queue number</li>
+                <li><code>{promptSlug}</code> = short prompt text</li>
+              </ul>
+            </details>
+            <p id="snf-filename-error" class="snf-meta snf-error" hidden></p>
+            <p id="snf-filename-preview" class="snf-meta snf-preview" hidden></p>
+          </div>
+        </div>
+
+        <!-- Customize Save Folder toggle (OFF by default). -->
+        <div class="snf-toggle-row">
+          <label class="snf-switch">
+            <input id="snf-toggle-folder" type="checkbox" />
+            <span class="snf-switch-track" aria-hidden="true"></span>
+            <span class="snf-switch-text">Customize Save Folder</span>
+          </label>
+          <p id="snf-folder-toggle-helper" class="snf-toggle-helper">Files are saved in Downloads/SN Flow Auto.</p>
+
+          <div id="snf-folder-fields" class="snf-toggle-fields" hidden>
+            <label class="snf-label snf-toggle-label" for="snf-output-folder">Folder inside Downloads</label>
+            <input id="snf-output-folder" class="snf-input snf-fullw" type="text"
+              placeholder="SN Flow Auto" autocomplete="off" spellcheck="false" />
+            <p class="snf-meta snf-helper">Choose a subfolder inside your Chrome Downloads folder.</p>
+            <ul class="snf-folder-examples">
               <li><code>SN Flow Auto</code></li>
               <li><code>SN Flow Auto/Images</code></li>
               <li><code>SN Flow Auto/Videos</code></li>
               <li><code>SN Flow Auto/{ddmmyyyy}</code></li>
             </ul>
+            <p class="snf-folder-warn-mini">Chrome only allows automatic saving inside Downloads or its subfolders.</p>
+            <p id="snf-folder-error" class="snf-meta snf-error" hidden></p>
           </div>
-          <p class="snf-folder-warn">
-            For Chrome security reasons, extensions can only save automatically inside Downloads or subfolders inside Downloads.
-          </p>
-          <p id="snf-folder-error" class="snf-meta snf-error" hidden></p>
         </div>
 
-        <div class="snf-col snf-conflict-row">
-          <label class="snf-check">
-            <input id="snf-conflict-keep" type="checkbox" checked />
-            <span>Keep both files if name already exists</span>
-          </label>
-          <p class="snf-meta snf-helper" style="margin: 4px 0 0 28px;">Recommended. This prevents old files from being overwritten.</p>
-        </div>
+        <!-- Advanced Download Options — collapsed by default. -->
+        <details class="snf-advanced">
+          <summary>Advanced Download Options</summary>
+          <div class="snf-advanced-body">
+            <label class="snf-check">
+              <input id="snf-conflict-keep" type="checkbox" checked />
+              <span>Keep both files if name already exists</span>
+            </label>
+            <p class="snf-meta snf-helper snf-advanced-helper">Recommended. This prevents older files from being overwritten.</p>
+          </div>
+        </details>
 
+        <!-- Action buttons sit at the bottom; no long helper text. -->
         <div class="snf-actions snf-download-actions">
-          <button type="button" id="snf-open-last-download" class="snf-btn snf-secondary">Open Last Download</button>
-          <button type="button" id="snf-open-downloads-folder" class="snf-btn snf-secondary">Open Downloads Folder</button>
+          <button type="button" id="snf-open-last-download" class="snf-btn snf-secondary"
+            title="Open the location of the most recently downloaded file.">Open Last Download</button>
+          <button type="button" id="snf-open-downloads-folder" class="snf-btn snf-secondary"
+            title="Open your Chrome Downloads folder.">Open Downloads Folder</button>
         </div>
-        <p class="snf-meta snf-download-actions-helper">
-          <strong>Open Last Download:</strong> open the location of the most recently downloaded file.
-          <br />
-          <strong>Open Downloads Folder:</strong> open your default Chrome Downloads folder.
-        </p>
       </section>
 
       <section class="snf-card snf-pacing-card">
