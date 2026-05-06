@@ -129,34 +129,70 @@
     }
   }
 
+  // True when Slate's `[data-slate-placeholder="true"]` element is rendered
+  // anywhere inside the prompt input — Slate only shows this when its
+  // editor.children resolves to a single empty paragraph, which is what
+  // Flow's submit handler does immediately after consuming a prompt. This
+  // is a far more reliable "input cleared" signal than el.innerText, which
+  // contains the zero-width-non-joiner (\ufeff) Slate uses to keep an
+  // empty paragraph rendered, so a naive .trim() reads non-empty even when
+  // the editor IS empty post-submit.
+  function placeholderShowingNow(el) {
+    if (!el) return false;
+    try {
+      const root = (el.closest && el.closest('[contenteditable="true"]')) || el.parentElement || el;
+      if (!root) return false;
+      // Slate writes data-slate-placeholder="true" on the placeholder span.
+      const ph = root.querySelector('[data-slate-placeholder="true"]');
+      if (ph && D.isVisible(ph)) return true;
+    } catch (_) {}
+    return false;
+  }
+
+  // Strip the zero-width characters Slate uses for empty-paragraph
+  // rendering (\ufeff = BYTE ORDER MARK; \u200B = zero-width space) plus
+  // ordinary whitespace. .trim() alone does NOT remove \ufeff, which is
+  // why the previous "input cleared" check produced false negatives on
+  // successful Slate submits.
+  function isVisuallyEmpty(s) {
+    return !String(s || "").replace(/[\s\u00a0\u200b\ufeff]+/g, "");
+  }
+
   // After clicking submit, poll briefly for a visible signal that Flow
   // actually accepted the submission. Heuristics:
   //   - The prompt input clears (Flow blanks the bar after a successful submit)
   //   - The submit button becomes disabled / aria-disabled
   //   - A Flow validation toast surfaces ("Prompt must be provided" et al.)
-  //     We treat this as a *negative* signal — if it shows up, the click was
-  //     received but the prompt wasn't in Slate's controlled state, so we
-  //     return a sentinel telling the caller to surface a friendly error
-  //     instead of waiting 5 minutes for media that will never arrive.
+  //
+  // Order matters: we check POSITIVE signals first. A successful Slate
+  // submission can momentarily race with a stale validation toast carried
+  // over from earlier interactions — if we treated the toast as a hard
+  // failure before noticing the input had already cleared, we'd retry on
+  // an empty editor and produce a real validation error. So we only
+  // trust the toast as a negative signal AFTER confirming the input did
+  // not clear during the same poll iteration.
   async function verifySubmitted(promptEl, btn, beforeText, totalMs = 2500) {
     const start = Date.now();
     const beforeTrim = (beforeText || "").trim();
     while (Date.now() - start < totalMs) {
       await new Promise((r) => setTimeout(r, 120));
 
-      // Negative signal: validation toast.
-      const toast = findValidationToast();
-      if (toast) return { ok: false, validationError: toast };
-
-      // Positive signal A: prompt input cleared.
+      // Positive signal A: prompt input cleared. For Slate this includes:
+      //   - the placeholder span being re-rendered, OR
+      //   - innerText becoming empty after stripping ZWSP/BOM that Slate
+      //     uses to keep its empty-paragraph alive.
       try {
         if (promptEl) {
-          const cur = (
+          if (placeholderShowingNow(promptEl)) {
+            return { ok: true, signal: "input-cleared" };
+          }
+          const cur =
             promptEl.tagName === "TEXTAREA" || promptEl.tagName === "INPUT"
               ? String(promptEl.value || "")
-              : String(promptEl.innerText || promptEl.textContent || "")
-          ).trim();
-          if (beforeTrim && !cur) return { ok: true, signal: "input-cleared" };
+              : String(promptEl.innerText || promptEl.textContent || "");
+          if (beforeTrim && isVisuallyEmpty(cur)) {
+            return { ok: true, signal: "input-cleared" };
+          }
           // Some Flow surfaces leave the prompt visible but mark it readonly
           // / aria-busy after submit.
           const busy = promptEl.getAttribute("aria-busy") === "true"
@@ -172,6 +208,13 @@
           return { ok: true, signal: "button-disabled" };
         }
       } catch (_) {}
+
+      // Negative signal: validation toast. Only checked after positive
+      // signals failed for THIS iteration, so a stray "Prompt must be
+      // provided" toast from a prior failed submit doesn't preempt
+      // detection of a successful clear that happened simultaneously.
+      const toast = findValidationToast();
+      if (toast) return { ok: false, validationError: toast };
     }
     return { ok: false, signal: "no-signal" };
   }
