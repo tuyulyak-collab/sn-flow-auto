@@ -31,12 +31,17 @@
  *      As a fallback, dispatch a paste event with ClipboardEvent +
  *      DataTransfer (Slate's onPaste handler).
  *
- * We deliberately do NOT call document.execCommand("delete") or
- * document.execCommand("insertText"), and do NOT mutate window.getSelection()
- * directly via Range.selectNodeContents on a Slate editor — those bypass
- * Slate's controlled model and corrupt React's reconciliation, leading to
- * the labs.google "Application error: a client-side exception has occurred"
- * page on the next render (verified May 2026).
+ * We deliberately do NOT call document.execCommand("delete") on a Slate
+ * editor — that path removes DOM nodes that Slate's React tree references,
+ * which corrupts React's reconciliation and causes the labs.google
+ * "Application error: a client-side exception has occurred" page on the
+ * next render (NotFoundError: removeChild, verified May 2026).
+ *
+ * document.execCommand("insertText") IS used as a fallback when the
+ * synthetic beforeinput event isn't preventDefault'd by Slate — unlike the
+ * delete variant, insertText only ADDS DOM nodes, which Slate's
+ * MutationObserver picks up and reconciles into its controlled state. This
+ * is the same path that Slate uses to ingest real keyboard input.
  */
 (function (root) {
   const D = root.SNFlowDom;
@@ -204,11 +209,48 @@
     }
   }
 
+  // Set the DOM selection to the end of the editor's content (or to the
+  // editor itself if it's empty). Slate listens to selectionchange and
+  // will sync its controlled selection model. We deliberately collapse the
+  // range — we never leave a non-collapsed Range covering live DOM nodes
+  // because the next mutation could remove those nodes from underneath
+  // React (the original crash signature).
+  function setDomSelectionAtEnd(el) {
+    try {
+      el.focus();
+      const range = document.createRange();
+      // Walk to the deepest last child so the cursor sits AFTER any
+      // existing text. For an empty Slate editor this is just el itself.
+      let target = el;
+      while (target && target.lastChild) target = target.lastChild;
+      if (target && target.nodeType === 3 /* TEXT_NODE */) {
+        const len = (target.nodeValue || "").length;
+        range.setStart(target, len);
+        range.setEnd(target, len);
+      } else {
+        range.selectNodeContents(target || el);
+        range.collapse(false);
+      }
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch (_) {}
+  }
+
   // Insert text by dispatching a beforeinput event (Slate's primary input
-  // observer). Slate's onBeforeInput handler calls Editor.insertText which
-  // updates BOTH the DOM AND the React-controlled model in a single React
-  // transaction. We do NOT call document.execCommand here — that would
-  // mutate the DOM directly and desync React's fiber tree.
+  // observer). Two-stage path:
+  //   (a) Synthetic beforeinput — if Slate's onBeforeInput accepts it (calls
+  //       preventDefault), Slate updates BOTH the DOM AND its React state
+  //       in one transaction.
+  //   (b) If Slate doesn't preventDefault (typical for synthetic events,
+  //       which lack getTargetRanges()), we fall back to
+  //       document.execCommand("insertText"). This fires a *native*
+  //       beforeinput that Slate's onBeforeInput handler processes
+  //       correctly, AND/OR triggers Slate's MutationObserver to ingest
+  //       the resulting DOM changes into its React state.
+  // Crucially, we do NOT call execCommand("delete") anywhere on a Slate
+  // editor — that's the operation that corrupted React's fiber tree.
+  // execCommand("insertText") only ADDS nodes and is safe.
   function tryBeforeInputInsert(el, text) {
     try {
       const before = new InputEvent("beforeinput", {
@@ -218,7 +260,10 @@
         inputType: "insertText",
         data: text,
       });
-      el.dispatchEvent(before);
+      const accepted = el.dispatchEvent(before);
+      if (accepted && !before.defaultPrevented) {
+        try { document.execCommand("insertText", false, text); } catch (_) {}
+      }
       return true;
     } catch (_) {
       return false;
@@ -304,9 +349,20 @@
     // 'removeChild' on 'Node').
     const isSlate = el.getAttribute("data-slate-editor") === "true";
 
-    slateSafeClear(el);
-    // Give Slate one frame to commit the clear before inserting.
+    // Step 1: focus the editor so Slate's onFocus handler runs and primes
+    // its internal selection state.
+    try { el.focus(); } catch (_) {}
     await new Promise((r) => setTimeout(r, 30));
+
+    // Step 2: Slate-safe clear (no execCommand, no DOM range delete).
+    slateSafeClear(el);
+    await new Promise((r) => setTimeout(r, 30));
+
+    // Step 3: collapse DOM selection at end of (now-empty) editor so the
+    // upcoming insertion has a known anchor point. Slate listens for
+    // selectionchange and will mirror this into its controlled selection.
+    setDomSelectionAtEnd(el);
+    await new Promise((r) => setTimeout(r, 10));
 
     const strategies = isSlate
       ? [
