@@ -681,6 +681,76 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === "SN_FLOW_FIBER_INSERT") {
+    // Content script (isolated world) cannot reach Slate's React fiber
+    // because:
+    //   1) editor.insertText must run in the page's main world, where React
+    //      props live (fiber.memoizedProps.editor on the Slate Editable
+    //      component).
+    //   2) In Chrome 133+, scripts created via document.createElement +
+    //      textContent + appendChild from any isolated world DO NOT
+    //      execute. Verified May 2026 across 5 injection variants
+    //      (textContent / .text / innerHTML / blob URL / appended
+    //      textNode). Our previous attempts to bridge isolated→main via
+    //      <script>+CustomEvent or <script>+DOM-attribute therefore time
+    //      out — the script body never ran.
+    // The only working path is chrome.scripting.executeScript with
+    // world:"MAIN", which the manifest's "scripting" permission lets us
+    // call from the SW.
+    const tabId = sender && sender.tab && sender.tab.id;
+    const text = (msg.payload && typeof msg.payload.text === "string") ? msg.payload.text : "";
+    if (!tabId) { sendResponse({ ok: false, error: "no-tab-id" }); return false; }
+    if (!text) { sendResponse({ ok: false, error: "empty-text" }); return false; }
+    chrome.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      args: [text],
+      func: (payload) => {
+        function nodeText(n) {
+          if (typeof n.text === "string") return n.text;
+          if (n && Array.isArray(n.children)) return n.children.map(nodeText).join("");
+          return "";
+        }
+        var el = document.querySelector("[data-slate-editor=true]");
+        if (!el) return { ok: false, info: "no-slate-element" };
+        var fiberKey = Object.keys(el).find(function (k) {
+          return k.indexOf("__reactFiber") === 0 || k.indexOf("__reactInternalInstance") === 0;
+        });
+        if (!fiberKey) return { ok: false, info: "no-fiber-key" };
+        var fiber = el[fiberKey];
+        var editor = null;
+        for (var d = 0; d < 30 && fiber && !editor; d++) {
+          var mp = fiber.memoizedProps;
+          if (mp && mp.editor && typeof mp.editor.insertText === "function") editor = mp.editor;
+          else if (fiber.stateNode && fiber.stateNode.editor && typeof fiber.stateNode.editor.insertText === "function") editor = fiber.stateNode.editor;
+          fiber = fiber.return;
+        }
+        if (!editor) return { ok: false, info: "no-editor" };
+        try {
+          if (typeof editor.start === "function" && typeof editor.end === "function" && typeof editor.select === "function") {
+            editor.select({ anchor: editor.start([]), focus: editor.end([]) });
+          }
+          if (typeof editor.delete === "function") {
+            try { editor.delete(); } catch (_) {}
+          }
+        } catch (_) {}
+        try { editor.insertText(payload); }
+        catch (e) { return { ok: false, info: "insertText-throw: " + (e && e.message || e) }; }
+        try { if (typeof editor.onChange === "function") editor.onChange(); } catch (_) {}
+        var actual = (editor.children || []).map(nodeText).join("");
+        var ok = actual.indexOf(payload) !== -1;
+        return { ok: ok, info: ok ? "committed" : "state-empty", actual: actual };
+      },
+    }).then((results) => {
+      const r = (results && results[0] && results[0].result) || { ok: false, info: "no-result" };
+      Log.log("[SN Flow] fiber insert (MAIN world) result", { ok: !!r.ok, info: r.info, actual: (r.actual || "").slice(0, 60) });
+      sendResponse(r);
+    }).catch((err) => {
+      sendResponse({ ok: false, info: "scripting.executeScript threw: " + String(err && err.message || err) });
+    });
+    return true; // async sendResponse
+  }
+
   return false;
 });
 

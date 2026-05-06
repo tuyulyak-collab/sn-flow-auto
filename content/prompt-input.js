@@ -364,84 +364,61 @@
     } catch (_) {}
   }
 
-  // Last-resort fallback: inject a tiny <script> into the page context that
-  // walks the React fiber tree from the Slate editor element to find
-  // Slate's editor instance, then calls editor.insertText() directly.
-  // This bypasses ALL event handling — it directly mutates Slate's
-  // controlled state. We use this only when every event-driven strategy
-  // has failed because it depends on React internals (16/17/18 fiber key
-  // names: __reactFiber$, __reactInternalInstance$). The injected script
-  // posts a CustomEvent back so we know whether it succeeded.
+  // PRIMARY Slate strategy: ask the service worker to run a page-world
+  // script (chrome.scripting.executeScript with world:"MAIN") that walks
+  // the React fiber tree from the Slate editor element, finds Slate's
+  // editor instance, and calls
+  //   editor.select({ anchor: editor.start([]), focus: editor.end([]) });
+  //   editor.delete();
+  //   editor.insertText(text);
+  //   editor.onChange();
+  // This is the only mutation that updates editor.children — Flow's submit
+  // handler reads ONLY editor.children, so synthetic beforeinput / paste /
+  // execCommand briefly update the DOM but Slate's reconciler wipes them.
+  //
+  // We CANNOT do the page-world hop ourselves from the content script:
+  // in Chrome 133+ scripts created via document.createElement + textContent
+  // + appendChild from any isolated world simply do NOT execute on
+  // labs.google. Verified May 2026 across 5 variants (textContent / .text
+  // / innerHTML / blob URL / appended textNode) — every one of them left
+  // the result attribute null. So we round-trip via the SW, which has
+  // chrome.scripting permission and can run code in the page's main world
+  // where React fiber properties (__reactFiber$, __reactInternalInstance$)
+  // live.
   function tryReactFiberInsert(el, text) {
     return new Promise((resolve) => {
-      const ok = (e) => { cleanup(); resolve(!!(e && e.detail && e.detail.ok)); };
-      const timer = setTimeout(() => { cleanup(); resolve(false); }, 1500);
-      function cleanup() {
-        clearTimeout(timer);
-        document.removeEventListener("sn-flow-fiber-insert-result", ok);
-      }
-      document.addEventListener("sn-flow-fiber-insert-result", ok, { once: true });
+      const Log = root.SNFlowLogger;
       try {
-        // We tag the target editor so the page-context script can find
-        // exactly the same element we have a reference to.
-        const tag = "data-sn-flow-target-" + Math.random().toString(36).slice(2, 8);
-        el.setAttribute(tag, "1");
-        const src = "(" + (function (selector, payload) {
-          try {
-            var node = document.querySelector(selector);
-            if (!node) return done(false);
-            var fiberKey = Object.keys(node).find(function (k) {
-              return k.indexOf("__reactFiber") === 0 || k.indexOf("__reactInternalInstance") === 0;
-            });
-            if (!fiberKey) return done(false);
-            var fiber = node[fiberKey];
-            // Walk up looking for an object with `editor` (Slate stores it
-            // on the EditableComponent instance as memoizedProps.editor or
-            // stateNode.editor depending on version).
-            var editor = null;
-            for (var depth = 0; depth < 30 && fiber && !editor; depth++) {
-              var mp = fiber.memoizedProps;
-              if (mp && mp.editor && typeof mp.editor.insertText === "function") editor = mp.editor;
-              else if (fiber.stateNode && fiber.stateNode.editor && typeof fiber.stateNode.editor.insertText === "function") editor = fiber.stateNode.editor;
-              fiber = fiber.return;
-            }
-            if (!editor) return done(false);
-            // Clear and insert via Slate's editor API — this updates
-            // React state directly. Use Transforms when available.
-            try {
-              var Transforms = window.SlateTransforms || (editor.constructor && editor.constructor.Transforms) || null;
-              if (Transforms && typeof Transforms.select === "function") {
-                Transforms.select(editor, { anchor: editor.start([]), focus: editor.end([]) });
-                editor.deleteFragment();
-              } else if (typeof editor.delete === "function") {
-                // editor.selection may be null — select all first.
-                if (typeof editor.start === "function" && typeof editor.end === "function") {
-                  editor.selection = { anchor: editor.start([]), focus: editor.end([]) };
-                  editor.delete();
-                }
-              }
-              editor.insertText(payload);
-              editor.onChange && editor.onChange();
-              return done(true);
-            } catch (e) {
-              return done(false);
-            }
-          } catch (e) {
-            return done(false);
+        if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.sendMessage) {
+          if (Log && Log.warn) Log.warn("[SN Flow] fiber insert: chrome.runtime.sendMessage unavailable");
+          return resolve(false);
+        }
+      } catch (_) { return resolve(false); }
+      let settled = false;
+      const finish = (ok) => { if (!settled) { settled = true; resolve(!!ok); } };
+      const timer = setTimeout(() => {
+        if (Log && Log.warn) Log.warn("[SN Flow] fiber insert timed out (no SW response)");
+        finish(false);
+      }, 5000);
+      try {
+        chrome.runtime.sendMessage({ type: "SN_FLOW_FIBER_INSERT", payload: { text } }, (resp) => {
+          clearTimeout(timer);
+          const lastErr = chrome.runtime.lastError;
+          if (lastErr) {
+            if (Log && Log.warn) Log.warn("[SN Flow] fiber insert: runtime.lastError", String(lastErr.message || lastErr));
+            return finish(false);
           }
-          function done(ok) {
-            document.dispatchEvent(new CustomEvent("sn-flow-fiber-insert-result", { detail: { ok: !!ok } }));
+          if (!resp || typeof resp !== "object") {
+            if (Log && Log.warn) Log.warn("[SN Flow] fiber insert: empty SW response");
+            return finish(false);
           }
-        }).toString() + ")(" + JSON.stringify("[" + tag + ']') + ", " + JSON.stringify(text) + ");";
-        const script = document.createElement("script");
-        script.textContent = src;
-        (document.head || document.documentElement).appendChild(script);
-        script.remove();
-        // Clean up the tag a moment later (the script ran already).
-        setTimeout(function () { try { el.removeAttribute(tag); } catch (_) {} }, 50);
-      } catch (_) {
-        cleanup();
-        resolve(false);
+          if (Log && Log.log) Log.log("[SN Flow] fiber insert result", { ok: !!resp.ok, info: resp.info, actual: (resp.actual || "").slice(0, 60) });
+          finish(!!resp.ok);
+        });
+      } catch (e) {
+        clearTimeout(timer);
+        if (Log && Log.warn) Log.warn("[SN Flow] fiber insert: sendMessage threw", String(e && e.message || e));
+        finish(false);
       }
     });
   }
@@ -525,6 +502,37 @@
     setDomSelectionAtEnd(el);
     await new Promise((r) => setTimeout(r, 10));
 
+    // PRIMARY for Slate: page-context React fiber injection.
+    // Slate's submit handler reads ONLY editor.children. Every event-driven
+    // path (synthetic beforeinput, paste, execCommand) updates the DOM
+    // briefly but Slate's reconciler wipes it because React state stays
+    // empty — pollForCommit returns true on the transient DOM, then the
+    // generate handler fires "Prompt must be provided". The only path that
+    // actually mutates editor.children is editor.select+delete+insertText
+    // called inside Slate's own world. Verified live May 2026.
+    if (isSlate) {
+      const fiberOk = await tryReactFiberInsert(el, text);
+      if (fiberOk) {
+        const committed = await pollForCommit(el, text, 800);
+        if (committed) {
+          if (Log && Log.log) Log.log("[SN Flow] prompt fill ok", { strategy: "reactFiber", len: text.length });
+          return true;
+        }
+        if (Log && Log.warn) Log.warn("[SN Flow] fiber insert reported ok but pollForCommit failed; trying event-driven fallbacks");
+      } else {
+        if (Log && Log.warn) Log.warn("[SN Flow] fiber insert failed; falling back to event-driven strategies");
+      }
+      // Re-prime selection before fallbacks.
+      realClickEditor(el);
+      await new Promise((r) => setTimeout(r, 60));
+      if (!isEmptyEditor(el)) {
+        dispatchKey(el, "a", { mod: true, code: "KeyA", keyCode: 65 });
+        await new Promise((r) => setTimeout(r, 30));
+        dispatchKey(el, "Backspace", { code: "Backspace", keyCode: 8 });
+        await new Promise((r) => setTimeout(r, 50));
+      }
+    }
+
     // Strategy 1: execCommand("insertText") directly (now that selection is set).
     // This is the path Slate uses to ingest real keyboard input — a native
     // beforeinput fires that Slate's onBeforeInput handler processes.
@@ -581,18 +589,10 @@
       }
     }
 
-    // Strategy 4: page-context React fiber injection (last resort).
-    if (isSlate) {
-      if (Log && Log.warn) Log.warn("[SN Flow] event-driven strategies all failed; trying React fiber injection");
-      const fiberOk = await tryReactFiberInsert(el, text);
-      if (fiberOk) {
-        const committed = await pollForCommit(el, text, 800);
-        if (committed) {
-          if (Log && Log.log) Log.log("[SN Flow] prompt fill ok", { strategy: "reactFiber", len: text.length });
-          return true;
-        }
-      }
-    }
+    // (React fiber injection runs as the PRIMARY Slate strategy above —
+    // see "PRIMARY for Slate" block. Event-driven strategies are fallbacks
+    // for non-Slate contenteditables or for Slate builds where the fiber
+    // walk fails.)
 
     // Non-Slate contenteditable fallback: textNode append. We only do this
     // for elements that are explicitly NOT Slate — for Slate this would
