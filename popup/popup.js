@@ -750,17 +750,28 @@
     // Toggle handlers — flip customise* flags and mirror the active
     // template/folder keys to either the user's last customisation or the
     // safe defaults so the SW stays on whichever the user just chose.
+    //
+    // If the saved custom value is invalid (e.g. user typed "bad<file>?"
+    // and toggled OFF before fixing it), keep the active key on the safe
+    // default so the SW never sees a broken value, surface the inline
+    // error so the user notices, and preserve the bad text in the input
+    // so they can fix it without retyping.
     if (els.toggleFilename) {
       els.toggleFilename.addEventListener("change", async (e) => {
         const on = !!e.target.checked;
         const cur = await Storage.getSettings();
         if (on) {
-          const v = cur.filenameTemplateCustom || DEFAULT_FILENAME_TEMPLATE;
+          const raw = cur.filenameTemplateCustom || DEFAULT_FILENAME_TEMPLATE;
+          const check = DownloadPath.validateFilenameTemplate(raw);
           await Storage.setSettings({
             customizeFileName: true,
-            filenameTemplate: v,
-            filenameTemplateCustom: v,
+            filenameTemplate: check.ok ? check.value : DEFAULT_FILENAME_TEMPLATE,
+            filenameTemplateCustom: raw,
           });
+          if (!check.ok) {
+            hasInteracted.filenameTemplate = true;
+            setFieldError(els.filenameTemplate, els.filenameError, check.error);
+          }
         } else {
           await Storage.setSettings({
             customizeFileName: false,
@@ -778,12 +789,17 @@
         const on = !!e.target.checked;
         const cur = await Storage.getSettings();
         if (on) {
-          const v = typeof cur.outputFolderCustom === "string" ? cur.outputFolderCustom : DEFAULT_OUTPUT_FOLDER;
+          const raw = typeof cur.outputFolderCustom === "string" ? cur.outputFolderCustom : DEFAULT_OUTPUT_FOLDER;
+          const check = DownloadPath.validateOutputFolder(raw);
           await Storage.setSettings({
             customizeFolder: true,
-            outputFolder: v,
-            outputFolderCustom: v,
+            outputFolder: check.ok ? check.value : DEFAULT_OUTPUT_FOLDER,
+            outputFolderCustom: raw,
           });
+          if (!check.ok) {
+            hasInteracted.outputFolder = true;
+            setFieldError(els.outputFolder, els.folderError, check.error);
+          }
         } else {
           await Storage.setSettings({
             customizeFolder: false,
