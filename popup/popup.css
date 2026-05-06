@@ -29,9 +29,9 @@ html, body {
   width: 36px; height: 36px;
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.65);
-  color: #4a1c1c;
-  display: flex; align-items: center; justify-content: center;
-  font-weight: 800; letter-spacing: 0.4px;
+  display: block;
+  object-fit: contain;
+  padding: 4px;
   box-shadow: 0 2px 6px rgba(74, 28, 28, 0.18);
 }
 .snf-titles h1 {
