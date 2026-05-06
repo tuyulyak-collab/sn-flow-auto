@@ -12,20 +12,31 @@
  * one of the events it explicitly listens for:
  *   - native `paste` event (with ClipboardEvent.clipboardData)
  *   - `beforeinput` event (inputType=insertText / insertFromPaste, with .data)
- *   - the synthetic input event produced by document.execCommand("insertText")
- * If we mutate the DOM directly (innerHTML / textNode append) the text *appears*
- * in the editor visually but Slate's controlled model stays empty — the next
- * React render will keep showing the placeholder, and Flow's submit handler
- * sees an empty prompt and rejects with "Prompt must be provided".
+ *   - keydown for navigation/selection (Cmd+A, Backspace, Delete, etc.)
+ * If we mutate the DOM directly (innerHTML / textNode append, or DOM-level
+ * Range + execCommand("delete")) the text *appears* in the editor visually but
+ * Slate's React-controlled model stays empty — Flow's submit handler sees an
+ * empty prompt, AND React's reconciler later crashes with NotFoundError:
+ * Failed to execute 'removeChild' on 'Node' because the DOM and the React
+ * fiber tree have diverged.
  *
- * We therefore try three Slate-aware strategies in order, verifying after
- * each one that *both* the DOM has the text AND Slate's placeholder is gone:
- *   (a) Dispatch a `paste` event with ClipboardEvent + DataTransfer
- *   (b) Dispatch a `beforeinput` event (inputType=insertText, data=text);
- *       if not preventDefault'd, also run document.execCommand("insertText")
- *   (c) Plain document.execCommand("insertText") with explicit selection
- * If all three fail to register with Slate, throw a clear error so the run
- * loop surfaces it instead of waiting 5 minutes for result-watcher to time out.
+ * We therefore use ONLY Slate-friendly event dispatches:
+ *   1) Focus + dispatch Ctrl+A keydown (Slate's keydown handler updates its
+ *      selection model — does NOT touch the DOM).
+ *   2) If editor is non-empty, dispatch beforeinput with
+ *      inputType="deleteContentBackward" (Slate handles via its onBeforeInput
+ *      handler — updates both DOM and React state in one transaction).
+ *   3) Dispatch beforeinput with inputType="insertText" and data=text
+ *      (Slate handles natively — single React update, reconciliation-safe).
+ *      As a fallback, dispatch a paste event with ClipboardEvent +
+ *      DataTransfer (Slate's onPaste handler).
+ *
+ * We deliberately do NOT call document.execCommand("delete") or
+ * document.execCommand("insertText"), and do NOT mutate window.getSelection()
+ * directly via Range.selectNodeContents on a Slate editor — those bypass
+ * Slate's controlled model and corrupt React's reconciliation, leading to
+ * the labs.google "Application error: a client-side exception has occurred"
+ * page on the next render (verified May 2026).
  */
 (function (root) {
   const D = root.SNFlowDom;
@@ -114,21 +125,29 @@
     el.dispatchEvent(new Event("change", { bubbles: true, cancelable: true }));
   }
 
-  function selectAll(el) {
-    try {
-      el.focus();
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(range);
-    } catch (_) {}
-  }
-
-  function clearSlateEditor(el) {
-    // Select the entire Slate value, then let insertText overwrite it.
-    selectAll(el);
-    try { document.execCommand("delete", false); } catch (_) {}
+  // Slate listens for keydown events to update its selection model. Dispatching
+  // a Ctrl+A keydown causes Slate to set its internal selection to cover the
+  // whole editor — without touching the DOM. This is the React-safe way to
+  // "select all" inside a Slate editor; window.getSelection() + Range API is
+  // NOT (it sets the DOM selection but Slate's controlled state stays stale,
+  // and any subsequent execCommand("delete") corrupts React's fiber tree).
+  function dispatchKey(el, key, opts = {}) {
+    if (!el) return;
+    const isMac = /Mac|iPhone|iPad/.test(navigator.platform || "");
+    const init = {
+      key,
+      code: opts.code || (key.length === 1 ? "Key" + key.toUpperCase() : key),
+      keyCode: opts.keyCode || (key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0),
+      which: opts.keyCode || (key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0),
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      ctrlKey: !isMac && !!opts.mod,
+      metaKey: isMac && !!opts.mod,
+      shiftKey: !!opts.shift,
+    };
+    try { el.dispatchEvent(new KeyboardEvent("keydown", init)); } catch (_) {}
+    try { el.dispatchEvent(new KeyboardEvent("keyup", init)); } catch (_) {}
   }
 
   // True when the editor's controlled state still considers the prompt empty.
@@ -149,12 +168,70 @@
     return false;
   }
 
+  // Returns the trimmed text Slate currently shows. Used to decide whether to
+  // skip the clear step (empty editor → no clear needed).
+  function isEmptyEditor(el) {
+    if (!el) return true;
+    if (placeholderStillShowing(el)) return true;
+    const txt = (el.innerText || el.textContent || "").replace(/\s+/g, "");
+    return !txt;
+  }
+
+  // Slate-safe clear. Each step routes through Slate's React-aware event
+  // handlers — never via document.execCommand or direct DOM mutation. If
+  // beforeinput is preventDefault'd, Slate took ownership and updated its
+  // controlled state; if not, we fall back to a delete keydown which Slate
+  // also handles via onKeyDown.
+  function slateSafeClear(el) {
+    if (!el) return;
+    el.focus();
+    if (isEmptyEditor(el)) return;
+    // 1) Select all via keydown — Slate's keydown handler covers Cmd/Ctrl+A.
+    dispatchKey(el, "a", { mod: true, code: "KeyA", keyCode: 65 });
+    // 2) Delete the selection via beforeinput. Slate handles this and updates
+    //    both DOM and React state in one transaction.
+    try {
+      el.dispatchEvent(new InputEvent("beforeinput", {
+        bubbles: true, cancelable: true, composed: true,
+        inputType: "deleteContentBackward",
+      }));
+    } catch (_) {}
+    // 3) Backstop: if step 2 didn't clear (older Slate / non-Slate
+    //    contenteditable), a Backspace keydown will. Slate listens for
+    //    Backspace in its keydown handler and routes through Editor.deleteBackward.
+    if (!isEmptyEditor(el)) {
+      dispatchKey(el, "Backspace", { code: "Backspace", keyCode: 8 });
+    }
+  }
+
+  // Insert text by dispatching a beforeinput event (Slate's primary input
+  // observer). Slate's onBeforeInput handler calls Editor.insertText which
+  // updates BOTH the DOM AND the React-controlled model in a single React
+  // transaction. We do NOT call document.execCommand here — that would
+  // mutate the DOM directly and desync React's fiber tree.
+  function tryBeforeInputInsert(el, text) {
+    try {
+      const before = new InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        inputType: "insertText",
+        data: text,
+      });
+      el.dispatchEvent(before);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   // Insert text by simulating a paste. ClipboardEvent + DataTransfer is the
   // path Slate handles via its onPaste handler — it will call editor.insertText
-  // (or insertFragment) which updates the React-controlled model.
+  // (or insertFragment) which updates the React-controlled model. We do NOT
+  // attempt the Object.defineProperty fallback for ClipboardEvent.clipboardData
+  // — defining a non-configurable own property on an event whose prototype
+  // exposes clipboardData via a getter can trip Slate's paste handler.
   function tryPasteInsert(el, text) {
-    selectAll(el);
-    try { document.execCommand("delete", false); } catch (_) {}
     try {
       const dt = new DataTransfer();
       dt.setData("text/plain", text);
@@ -164,65 +241,16 @@
         composed: true,
         clipboardData: dt,
       });
-      // Some Chrome builds construct ClipboardEvent without preserving
-      // clipboardData; if so, drop it on the event manually.
-      if (!ev.clipboardData) {
-        try { Object.defineProperty(ev, "clipboardData", { value: dt }); } catch (_) {}
-      }
+      // If this Chrome build doesn't preserve clipboardData on synthetic
+      // ClipboardEvent, abort — Slate's paste handler reads clipboardData
+      // and would no-op without it. We'd rather fall through to another
+      // strategy than override the property and risk a TypeError.
+      if (!ev.clipboardData) return false;
       el.dispatchEvent(ev);
       return true;
     } catch (_) {
       return false;
     }
-  }
-
-  // Insert text by dispatching a beforeinput event (Slate's primary input
-  // observer). If Slate doesn't preventDefault, we also run execCommand to
-  // perform the underlying DOM mutation; if Slate does preventDefault, it
-  // owns the mutation itself and we just dispatch a follow-up input event.
-  function tryBeforeInputInsert(el, text) {
-    selectAll(el);
-    try { document.execCommand("delete", false); } catch (_) {}
-    try {
-      const before = new InputEvent("beforeinput", {
-        bubbles: true,
-        cancelable: true,
-        composed: true,
-        inputType: "insertText",
-        data: text,
-      });
-      const accepted = el.dispatchEvent(before);
-      if (accepted && !before.defaultPrevented) {
-        try { document.execCommand("insertText", false, text); } catch (_) {}
-      }
-      el.dispatchEvent(new InputEvent("input", {
-        bubbles: true,
-        cancelable: false,
-        composed: true,
-        inputType: "insertText",
-        data: text,
-      }));
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  // Fallback: explicit execCommand("insertText") with a fresh selection. This
-  // is the original path; kept as a last resort for environments where the
-  // event-dispatch routes above fail.
-  function tryExecCommandInsert(el, text) {
-    selectAll(el);
-    try { document.execCommand("delete", false); } catch (_) {}
-    let inserted = false;
-    try { inserted = !!(document.execCommand && document.execCommand("insertText", false, text)); } catch (_) {}
-    if (inserted) {
-      el.dispatchEvent(new InputEvent("input", {
-        bubbles: true, cancelable: false, composed: true,
-        inputType: "insertText", data: text,
-      }));
-    }
-    return inserted;
   }
 
   // Returns true iff the editor now visibly contains the requested text AND
@@ -266,49 +294,69 @@
       return true;
     }
 
-    // contenteditable / role=textbox / Slate path — try strategies in order.
+    // contenteditable / role=textbox / Slate path. Clear via Slate-safe events
+    // ONCE up front (no execCommand, no Range manipulation), then try the two
+    // remaining Slate-friendly insert strategies in order. We skip the
+    // (DOM-mutating) execCommand insert strategy entirely — it was the cause
+    // of "Application error: a client-side exception has occurred" on Flow
+    // when the React reconciler later tried to remove DOM nodes that we'd
+    // already mutated out from under it (NotFoundError: Failed to execute
+    // 'removeChild' on 'Node').
     const isSlate = el.getAttribute("data-slate-editor") === "true";
+
+    slateSafeClear(el);
+    // Give Slate one frame to commit the clear before inserting.
+    await new Promise((r) => setTimeout(r, 30));
 
     const strategies = isSlate
       ? [
-          { name: "paste", fn: tryPasteInsert },
           { name: "beforeinput", fn: tryBeforeInputInsert },
-          { name: "execCommand", fn: tryExecCommandInsert },
+          { name: "paste", fn: tryPasteInsert },
         ]
       : [
-          { name: "execCommand", fn: tryExecCommandInsert },
           { name: "beforeinput", fn: tryBeforeInputInsert },
           { name: "paste", fn: tryPasteInsert },
         ];
 
     for (const s of strategies) {
+      let ran = false;
       try {
-        s.fn(el, text);
+        ran = s.fn(el, text);
       } catch (e) {
         if (Log && Log.warn) Log.warn("[SN Flow] prompt insert strategy threw", { name: s.name, e: String(e && e.message || e) });
         continue;
       }
-      const ok = await pollForCommit(el, text, 600);
+      if (!ran) {
+        if (Log && Log.warn) Log.warn("[SN Flow] prompt insert strategy declined", { name: s.name });
+        continue;
+      }
+      const ok = await pollForCommit(el, text, 800);
       if (ok) {
         if (Log && Log.log) Log.log("[SN Flow] prompt fill ok", { strategy: s.name, len: text.length });
         return true;
       }
       if (Log && Log.warn) Log.warn("[SN Flow] prompt insert strategy did not commit; trying next", { name: s.name });
+      // Re-clear before the next strategy so we don't append on top of a
+      // partial first attempt. Slate-safe path only.
+      slateSafeClear(el);
+      await new Promise((r) => setTimeout(r, 30));
     }
 
-    // Final fallback: brute-force textNode append (DOES NOT update Slate, but
-    // gives users a visible artefact in case they're testing on a non-Slate
-    // contenteditable). For Slate this will throw below.
-    try {
-      el.innerHTML = "";
-      el.appendChild(document.createTextNode(text));
-      el.dispatchEvent(new InputEvent("input", {
-        bubbles: true, cancelable: false, composed: true,
-        inputType: "insertText", data: text,
-      }));
-    } catch (_) {}
-    const ok = await pollForCommit(el, text, 400);
-    if (ok) return true;
+    // Non-Slate contenteditable fallback: textNode append. We only do this
+    // for elements that are explicitly NOT Slate — for Slate this would
+    // corrupt the React fiber tree (the very bug we're fixing).
+    if (!isSlate) {
+      try {
+        el.innerHTML = "";
+        el.appendChild(document.createTextNode(text));
+        el.dispatchEvent(new InputEvent("input", {
+          bubbles: true, cancelable: false, composed: true,
+          inputType: "insertText", data: text,
+        }));
+      } catch (_) {}
+      const ok = await pollForCommit(el, text, 400);
+      if (ok) return true;
+    }
 
     const tag = el.tagName + (isSlate ? "[slate]" : "");
     const msg = "prompt fill verification failed: Slate state stayed empty after every insert strategy (" + tag + ")";
