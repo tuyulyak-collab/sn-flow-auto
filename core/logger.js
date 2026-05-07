@@ -18,16 +18,45 @@
     return new Date().toISOString();
   }
 
+  // Stringify the optional `extra` argument so it never shows up as
+  // "[object Object]" in Chrome's extension Errors panel. The Errors panel
+  // string-concatenates console.warn args, so passing the raw object loses
+  // every field. We expand here once, then pass a single string downstream
+  // to console.* below — keep this in sync with consoleArgs() so the live
+  // DevTools log and the persisted log both stay readable.
+  function stringifyExtra(extra) {
+    if (extra === undefined || extra === null) return "";
+    if (typeof extra === "string") return extra;
+    if (extra instanceof Error) {
+      const parts = [extra.name || "Error", extra.message || String(extra)];
+      if (extra.stack) parts.push(String(extra.stack).split("\n").slice(0, 4).join(" | "));
+      return parts.filter(Boolean).join(": ");
+    }
+    try {
+      return JSON.stringify(extra, (_k, v) => {
+        if (v instanceof Error) return { name: v.name, message: v.message };
+        if (typeof v === "function") return "[function]";
+        if (typeof v === "undefined") return "[undefined]";
+        return v;
+      });
+    } catch (_) {
+      try { return String(extra); } catch (__) { return "[unstringifiable]"; }
+    }
+  }
+
   function fmt(level, msg, extra) {
     let line = `[${nowIso()}] [${level.toUpperCase()}] ${msg}`;
-    if (extra !== undefined) {
-      try {
-        line += " " + (typeof extra === "string" ? extra : JSON.stringify(extra));
-      } catch (_) {
-        // ignore circular structures
-      }
-    }
+    const s = stringifyExtra(extra);
+    if (s) line += " " + s;
     return line;
+  }
+
+  // Collapse the message + extra into a single string before forwarding to
+  // console.* so Chrome's Errors panel (and any aggregated logging surface)
+  // shows "[SN Flow] <msg> {json}" instead of "[SN Flow] <msg> [object Object]".
+  function consoleArgs(msg, extra) {
+    const s = stringifyExtra(extra);
+    return s ? [`[SN Flow] ${msg} ${s}`] : [`[SN Flow] ${msg}`];
   }
 
   function persist() {
@@ -51,25 +80,25 @@
 
   function log(msg, extra) {
     const line = fmt("info", msg, extra);
-    if (typeof console !== "undefined") console.log("[SN Flow]", msg, extra ?? "");
+    if (typeof console !== "undefined") console.log(...consoleArgs(msg, extra));
     emit(line, "info");
   }
 
   function warn(msg, extra) {
     const line = fmt("warn", msg, extra);
-    if (typeof console !== "undefined") console.warn("[SN Flow]", msg, extra ?? "");
+    if (typeof console !== "undefined") console.warn(...consoleArgs(msg, extra));
     emit(line, "warn");
   }
 
   function error(msg, extra) {
     const line = fmt("error", msg, extra);
-    if (typeof console !== "undefined") console.error("[SN Flow]", msg, extra ?? "");
+    if (typeof console !== "undefined") console.error(...consoleArgs(msg, extra));
     emit(line, "error");
   }
 
   function debug(msg, extra) {
     const line = fmt("debug", msg, extra);
-    if (typeof console !== "undefined" && console.debug) console.debug("[SN Flow]", msg, extra ?? "");
+    if (typeof console !== "undefined" && console.debug) console.debug(...consoleArgs(msg, extra));
     emit(line, "debug");
   }
 

@@ -14,6 +14,7 @@
   const ResultWatcher = root.SNFlowResultWatcher;
   const Downloader = root.SNFlowDownloader;
   const Settings = root.SNFlowSettings; // optional, may be absent on legacy load order
+  const Diagnostics = root.SNFlowDiagnostics; // optional — used by System Check
 
   if (!Dom || !PromptInput || !Generate || !ResultWatcher || !Downloader) {
     console.error("[SN Flow] missing module(s); content scripts not loaded in correct order");
@@ -132,10 +133,12 @@
     // 1) sending prompt — retry finding the prompt input up to 3 times
     //    with increasing timeouts in case Flow's DOM is slow to mount.
     await reportStatus(item.id, "sending");
+    const compatMult = (settings && settings.compatTimeoutMultiplier) || 1;
+    const promptFindTimeout = Math.round(12_000 * compatMult);
     const promptEl = await Retry.retry(
       async () => {
         const el = await Retry.waitFor(() => PromptInput.findPromptInput(), {
-          timeout: 12_000, interval: 350,
+          timeout: promptFindTimeout, interval: 350,
         });
         if (!el) throw new Error("prompt input not found");
         return el;
@@ -147,7 +150,9 @@
       slate: promptEl.getAttribute("data-slate-editor") === "true",
       role: promptEl.getAttribute("role") || "",
     });
-    await PromptInput.setPromptText(promptEl, item.prompt);
+    await PromptInput.setPromptText(promptEl, item.prompt, {
+      compatTimeoutMultiplier: (settings && settings.compatTimeoutMultiplier) || 1,
+    });
     Log.log("prompt fill verified", {
       preview: (PromptInput.readPromptText(promptEl) || "").slice(0, 60),
     });
@@ -156,14 +161,26 @@
     // snapshot media URLs before generation
     const before = ResultWatcher.snapshot();
 
-    // 2) click generate — retry up to 3 times if the button isn't found
+    // 2) click generate — retry up to 3 times if the click is not
+    //    confirmed by Flow. clickGenerate now returns a structured
+    //    { ok, via, signal/reason, button } so the thrown error carries
+    //    the actual reason (e.g. "promptStillFilled=true buttonStillEnabled=true")
+    //    instead of an opaque "[object Object]".
+    const baseVerifyMs = 5000;
+    const verifyMs = Math.round(baseVerifyMs * (settings && settings.compatTimeoutMultiplier || 1));
     const clicked = await Retry.retry(
       async () => {
-        const ok = await Generate.clickGenerate(promptEl);
-        if (!ok) throw new Error("generate button not found");
-        return ok;
+        const r = await Generate.clickGenerate(promptEl, { verifyMs });
+        if (!r || !r.ok) {
+          const reason = (r && r.reason) || "generate button not found";
+          const via = (r && r.via) || "none";
+          const btn = (r && r.button) || {};
+          throw new Error("generate-click failed (via=" + via + "): " + reason
+            + " | button: " + JSON.stringify(btn));
+        }
+        return r;
       },
-      { attempts: 3, baseDelay: 1000, onAttempt: (n) => n > 1 && Log.warn("generate button retry", { attempt: n }) },
+      { attempts: 3, baseDelay: 1000, onAttempt: (n, lastErr) => n > 1 && Log.warn("generate button retry", { attempt: n, lastError: lastErr && lastErr.message }) },
     );
     await reportStatus(item.id, "generating");
 
@@ -278,6 +295,20 @@
       sendResponse(ping());
       return false;
     }
+    if (msg.type === "SN_FLOW_DIAGNOSE_PAGE") {
+      // Run the full page-side diagnostic battery and return it. Wrapped
+      // in try/catch so a single bad check (e.g. a getter throwing on a
+      // detached element) never breaks the System Check report.
+      try {
+        const checks = Diagnostics ? Diagnostics.collectPage({
+          Dom, PromptInput, Generate, ResultWatcher, Settings,
+        }) : [];
+        sendResponse({ ok: true, checks });
+      } catch (e) {
+        sendResponse({ ok: false, error: String((e && e.message) || e) });
+      }
+      return false;
+    }
     if (msg.type === "SN_FLOW_TOGGLE_MONITOR") {
       try { root.SNFlowMonitor && root.SNFlowMonitor.toggleOpen(); } catch (_) {}
       sendResponse({ ok: true });
@@ -334,8 +365,13 @@
             friendly = "Flow rejected the prompt as empty — the editor's React state did not register the text. Try reloading the Flow tab.";
           } else if (/prompt fill verification failed/i.test(raw)) {
             friendly = "Could not write the prompt into Flow's editor — the input stayed empty after every insert strategy. Flow UI may have changed.";
-          } else if (/generate button not found/i.test(raw)) {
-            friendly = "Could not find the Generate button — Flow UI may have changed.";
+          } else if (/generate-click failed/i.test(raw) || /generate button not found/i.test(raw)) {
+            // Friendly summary plus the structured reason so the user can
+            // see whether the click was found-but-not-confirmed, or never
+            // found at all. Keep the raw reason appended — it is the
+            // single most useful clue when debugging cross-PC issues.
+            friendly = "Could not confirm the Generate click — " + raw
+              + " — open the popup → Run System Check for full diagnostics.";
           } else if (/timed out waiting for media/i.test(raw)) {
             friendly = "Timed out waiting for result — Flow may be slow or the generation failed silently.";
           } else if (/tab message timeout/i.test(raw)) {
