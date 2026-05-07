@@ -51,6 +51,7 @@
         "core/filename-template.js",
         "core/download-path.js",
         "core/pacing.js",
+        "core/diagnostics.js",
         "content/flow-detector.js",
         "content/flow-settings.js",
         "content/prompt-input.js",

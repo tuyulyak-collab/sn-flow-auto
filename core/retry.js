@@ -29,7 +29,11 @@
     for (let i = 0; i < attempts; i++) {
       if (signal && signal.aborted) throw new Error("aborted");
       try {
-        if (onAttempt) onAttempt(i + 1);
+        // Pass the previous attempt's error so callers can log *why* the
+        // retry is happening — critical on the failing PC, where logging
+        // just `{ attempt: 2 }` produced "[object Object]" with no
+        // diagnostic value.
+        if (onAttempt) onAttempt(i + 1, lastErr);
         return await fn(i + 1);
       } catch (err) {
         lastErr = err;

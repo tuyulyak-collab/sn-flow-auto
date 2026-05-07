@@ -63,10 +63,32 @@
     // a button living inside a <form> is much more likely to be Generate
     try { if (el.closest && el.closest("form")) s += 3; } catch (_) {}
 
+    // Cross-PC fallback signals — different Flow A/B variants and locales
+    // expose the submit button via these attribute hints. These are weak
+    // bonuses by design so they only break a tie, never override the
+    // strong arrow_forward / submit-type signals on the canonical layout.
+    try {
+      const ds = el.dataset || {};
+      const tid = String(ds.testid || ds.testId || "").toLowerCase();
+      if (/(generate|submit|send|create|prompt)/.test(tid)) s += 4;
+      const aria = (el.getAttribute && (el.getAttribute("aria-label") || "")) || "";
+      if (/^(generate|create|submit|send)\b/i.test(aria.trim())) s += 5;
+    } catch (_) {}
+
     if (anchor) {
       const d = D.distance(el, anchor);
       // closer = better, cap influence
       if (d < 600) s += Math.max(0, 5 - Math.floor(d / 120));
+      // Sibling-of-the-prompt-input bonus: on every Flow variant we've seen,
+      // the submit button is rendered inside the same toolbar / form as the
+      // prompt input. This bonus helps when the button has a non-canonical
+      // glyph (e.g. localized icon font) but is otherwise correctly placed.
+      try {
+        if (el.closest && anchor.closest) {
+          const sharedForm = el.closest("form");
+          if (sharedForm && sharedForm === anchor.closest("form")) s += 4;
+        }
+      } catch (_) {}
     }
 
     // Flow's prompt bar is near the bottom of the viewport
@@ -129,18 +151,56 @@
     }
   }
 
+  // Snapshot of what visual placeholder/loading affordances were on the
+  // page before we clicked submit — used by verifySubmitted to detect a
+  // *new* loading affordance appearing as a positive signal even when
+  // the prompt input doesn't clear and the button doesn't disable on
+  // some Flow A/B variants. Cross-PC variants observed in May 2026:
+  //   - Flow image gen: a flower/pinhole skeleton tile fades in
+  //   - Veo video gen: an aria-busy spinner appears in the gallery
+  //   - aitestkitchen surface: a progress bar with role="progressbar"
+  function loadingAffordancesNow() {
+    const out = new Set();
+    try {
+      for (const el of document.querySelectorAll('[role="progressbar"]')) {
+        if (D.isVisible && D.isVisible(el)) out.add(el);
+      }
+      for (const el of document.querySelectorAll('[aria-busy="true"]')) {
+        if (D.isVisible && D.isVisible(el)) out.add(el);
+      }
+      // Skeleton/placeholder image tiles — these usually have a low naturalWidth
+      // image with a recognisable URL pattern. We just count visible <img>
+      // matches as a coarse signal; verifySubmitted only cares about deltas.
+      for (const el of document.querySelectorAll("img")) {
+        const src = el.currentSrc || el.src || "";
+        if (/(flower-placeholder|pinhole|empty-state|skeleton|loading)/i.test(src) && D.isVisible(el)) {
+          out.add(el);
+        }
+      }
+    } catch (_) {}
+    return out;
+  }
+
   // After clicking submit, poll briefly for a visible signal that Flow
   // actually accepted the submission. Heuristics:
   //   - The prompt input clears (Flow blanks the bar after a successful submit)
   //   - The submit button becomes disabled / aria-disabled
+  //   - A new loading/skeleton/progress affordance appears (Flow renders
+  //     a placeholder tile while generating)
   //   - A Flow validation toast surfaces ("Prompt must be provided" et al.)
   //     We treat this as a *negative* signal — if it shows up, the click was
   //     received but the prompt wasn't in Slate's controlled state, so we
   //     return a sentinel telling the caller to surface a friendly error
   //     instead of waiting 5 minutes for media that will never arrive.
-  async function verifySubmitted(promptEl, btn, beforeText, totalMs = 2500) {
+  //
+  // totalMs default bumped from 2.5s → 5s because cross-PC reports show
+  // Flow taking >3s to clear the prompt or disable the button on slower
+  // hardware. The Slow PC mode toggle (popup → Settings) can multiply
+  // this further via settings.compatTimeoutMultiplier.
+  async function verifySubmitted(promptEl, btn, beforeText, totalMs = 5000) {
     const start = Date.now();
     const beforeTrim = (beforeText || "").trim();
+    const loadingBefore = loadingAffordancesNow();
     while (Date.now() - start < totalMs) {
       await new Promise((r) => setTimeout(r, 120));
 
@@ -172,8 +232,41 @@
           return { ok: true, signal: "button-disabled" };
         }
       } catch (_) {}
+
+      // Positive signal C: a new loading affordance (placeholder tile,
+      // progress bar, aria-busy region) appeared since we clicked. This
+      // covers Flow A/B variants where the prompt input stays populated
+      // and the button stays enabled but a skeleton tile materialises in
+      // the gallery.
+      try {
+        const loadingNow = loadingAffordancesNow();
+        for (const el of loadingNow) {
+          if (!loadingBefore.has(el)) return { ok: true, signal: "loading-affordance" };
+        }
+      } catch (_) {}
     }
-    return { ok: false, signal: "no-signal" };
+    // Build a richer no-signal description so the popup/log shows *why*
+    // the verification gave up instead of an opaque [object Object].
+    let curText = "";
+    try {
+      curText = promptEl
+        ? (promptEl.tagName === "TEXTAREA" || promptEl.tagName === "INPUT"
+            ? String(promptEl.value || "")
+            : String(promptEl.innerText || promptEl.textContent || ""))
+        : "";
+    } catch (_) {}
+    const stillFilled = curText.trim().length > 0;
+    const btnDisabled = !!(btn && (btn.disabled || (btn.getAttribute && btn.getAttribute("aria-disabled") === "true")));
+    return {
+      ok: false,
+      signal: "no-signal",
+      reason: [
+        "waited " + totalMs + "ms",
+        "promptStillFilled=" + stillFilled,
+        "buttonStillEnabled=" + (btn ? !btnDisabled : "no-button"),
+        "newLoadingAffordance=false",
+      ].join(", "),
+    };
   }
 
   // Look for Flow's "Prompt must be provided" / similar validation toast in
@@ -204,9 +297,14 @@
     return null;
   }
 
-  async function clickGenerate(promptEl) {
+  async function clickGenerate(promptEl, opts) {
     const Log = root.SNFlowLogger;
     const btn = findGenerateButton(promptEl);
+
+    // Per-attempt verification timeout — defaults match the new 5s baseline,
+    // but the run loop can pass a higher value (e.g. when Slow PC mode is
+    // on or for chained video steps that need more wait headroom).
+    const verifyMs = (opts && opts.verifyMs) || 5000;
 
     // Capture prompt-input value before submit so verifySubmitted can detect
     // a clear-on-submit signal.
@@ -226,36 +324,42 @@
         btn.click();
       }
       clickedVia = "button";
-      if (Log && Log.log) Log.log("[SN Flow] generate: clicked button", describeButton(btn));
+      if (Log && Log.log) Log.log("generate: clicked button", describeButton(btn));
     } else if (Log && Log.warn) {
-      Log.warn("[SN Flow] generate: no button matched, will fall back to Enter on prompt");
+      Log.warn("generate: no button matched, will fall back to Enter on prompt");
     }
 
     // First verification — did the button click do anything?
-    let result = await verifySubmitted(promptEl, btn, beforeText, btn ? 2500 : 0);
+    let result = await verifySubmitted(promptEl, btn, beforeText, btn ? verifyMs : 0);
     if (result.validationError) {
       throw new Error("Flow rejected submit: " + result.validationError);
     }
-    if (result.ok) return true;
+    if (result.ok) return { ok: true, via: clickedVia, signal: result.signal };
 
     // Fallback A: Enter keystroke on the prompt input. Many submit handlers
     // listen for Enter as the canonical form-submit action.
     if (promptEl) {
       pressEnter(promptEl);
       clickedVia = clickedVia ? clickedVia + "+enter" : "enter";
-      if (Log && Log.log) Log.log("[SN Flow] generate: pressed Enter on prompt input as fallback");
-      result = await verifySubmitted(promptEl, btn, beforeText, 2500);
+      if (Log && Log.log) Log.log("generate: pressed Enter on prompt input as fallback");
+      result = await verifySubmitted(promptEl, btn, beforeText, verifyMs);
       if (result.validationError) {
         throw new Error("Flow rejected submit: " + result.validationError);
       }
-      if (result.ok) return true;
+      if (result.ok) return { ok: true, via: clickedVia, signal: result.signal };
     }
 
-    // Nothing worked. Treat as "button not found" — caller will retry.
+    // Nothing worked. Surface a structured reason so the run loop /
+    // System Check can show *why* — not just "[object Object]".
+    const reason = (result && result.reason) || "no-signal";
     if (Log && Log.warn) {
-      Log.warn("[SN Flow] generate: submit not detected after click and Enter fallback", { clickedVia });
+      Log.warn("generate: submit not detected after click and Enter fallback", {
+        clickedVia,
+        button: describeButton(btn),
+        reason,
+      });
     }
-    return false;
+    return { ok: false, via: clickedVia, reason, button: describeButton(btn) };
   }
 
   root.SNFlowGenerate = { findGenerateButton, clickGenerate, describeButton };

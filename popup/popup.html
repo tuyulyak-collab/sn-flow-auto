@@ -17,6 +17,10 @@
     </div>
     <div class="snf-pill" id="snf-status">idle</div>
     <div class="snf-header-actions">
+      <button type="button" id="snf-system-check" class="snf-icon-action" title="Run System Check / Compatibility Test" aria-label="Run System Check">
+        <span class="snf-icon-glyph" aria-hidden="true">🩺</span>
+        <span class="snf-icon-label">check</span>
+      </button>
       <button type="button" id="snf-open-settings" class="snf-icon-action" title="Settings (Safe Speed &amp; Delays)" aria-label="Settings">
         <span class="snf-icon-glyph" aria-hidden="true">⚙</span>
         <span class="snf-icon-label">settings</span>
@@ -381,6 +385,52 @@
     </div>
   </dialog>
 
+  <!--
+    System Check / Compatibility Test modal — populated by popup.js when
+    the user clicks 🩺 in the header. Layout:
+      - header: title + Re-run button + close button
+      - summary block: verdict line + timestamp + Slow PC mode toggle
+      - report textarea: copyable plain-text dump of every check
+      - footer: Copy / Reinject Content Script / Close buttons
+    All buttons stay enabled during the run; the report area shows
+    "Running…" while diagnostics are gathering.
+  -->
+  <dialog id="snf-syscheck" class="snf-dialog snf-syscheck">
+    <header class="snf-syscheck-head">
+      <h2>System Check</h2>
+      <button type="button" id="snf-syscheck-close" class="snf-icon-action" title="Close" aria-label="Close">
+        <span class="snf-icon-glyph" aria-hidden="true">×</span>
+      </button>
+    </header>
+    <div class="snf-syscheck-body">
+      <div class="snf-syscheck-summary">
+        <div class="snf-syscheck-verdict" id="snf-syscheck-verdict">Idle</div>
+        <div class="snf-syscheck-meta" id="snf-syscheck-meta"></div>
+      </div>
+
+      <label class="snf-switch snf-syscheck-slow" for="snf-syscheck-slow-mode">
+        <input type="checkbox" id="snf-syscheck-slow-mode" />
+        <span class="snf-switch-track"></span>
+        <span class="snf-switch-text">
+          Slow PC mode <span class="snf-meta">(2× longer waits for Flow to react — turn on if this PC is the failing one)</span>
+        </span>
+      </label>
+
+      <textarea
+        id="snf-syscheck-report"
+        class="snf-syscheck-report"
+        readonly
+        spellcheck="false"
+        placeholder="Click 'Run Check' to gather a copy-paste-able compatibility report from this PC."
+      ></textarea>
+    </div>
+    <footer class="snf-syscheck-foot">
+      <button type="button" id="snf-syscheck-run" class="snf-btn snf-primary">Run Check</button>
+      <button type="button" id="snf-syscheck-copy" class="snf-btn snf-secondary" disabled>Copy Report</button>
+      <button type="button" id="snf-syscheck-reinject" class="snf-btn snf-secondary" disabled>Reinject Content Script</button>
+    </footer>
+  </dialog>
+
   <script src="../core/logger.js"></script>
   <script src="../core/retry.js"></script>
   <script src="../core/filename-template.js"></script>
@@ -389,6 +439,7 @@
   <script src="../core/queue-manager.js"></script>
   <script src="../core/prompt-parser.js"></script>
   <script src="../core/pacing.js"></script>
+  <script src="../core/diagnostics.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

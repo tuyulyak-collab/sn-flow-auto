@@ -46,6 +46,14 @@
     perItemDelayMs: 1500,           // legacy minimum baseline (kept for back-compat)
     maxAttempts: 3,
     promptInputDelayMs: 250,
+    // ---- Cross-PC compatibility timeouts ----
+    // slowMode bumps every poll/verify timeout by `compatTimeoutMultiplier`
+    // so slower PCs (or higher-latency Flow surfaces) get more time before
+    // the run loop retries. Defaults are conservative (multiplier=1) so
+    // fast PCs are unchanged. The popup's "Run System Check" modal exposes
+    // a toggle that flips this on and bumps the multiplier to 2.0.
+    slowMode: false,
+    compatTimeoutMultiplier: 1.0,
     // ---- anti-bot pacing ----
     // Flow rate-limits aggressive automation. These settings drive the
     // pacer in core/pacing.js. The defaults aim to look like a focused

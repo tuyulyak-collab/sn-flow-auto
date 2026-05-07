@@ -255,7 +255,13 @@
 
   // Returns true iff the editor now visibly contains the requested text AND
   // Slate's placeholder is no longer visible (i.e. React state caught up).
-  async function pollForCommit(el, expected, totalMs = 600) {
+  //
+  // Cross-PC compat: slower PCs sometimes need >1s for Slate to commit a
+  // beforeinput / paste insert into its React-controlled state. We default
+  // to 1500ms here (was 600ms) and allow the call site to override per
+  // strategy. The Slow PC mode toggle in popup → Settings further bumps
+  // this via settings.compatTimeoutMultiplier passed to setPromptText().
+  async function pollForCommit(el, expected, totalMs = 1500) {
     const exp = String(expected || "").trim();
     if (!exp) return true;
     const start = Date.now();
@@ -267,9 +273,10 @@
     return false;
   }
 
-  async function setPromptText(el, text) {
+  async function setPromptText(el, text, opts) {
     if (!el) throw new Error("prompt input not found");
     const Log = root.SNFlowLogger;
+    const mult = (opts && opts.compatTimeoutMultiplier) || 1;
 
     el.focus();
 
@@ -289,7 +296,7 @@
         el.value = text;
       }
       fireInputEvents(el);
-      const ok = await pollForCommit(el, text, 400);
+      const ok = await pollForCommit(el, text, Math.round(800 * mult));
       if (!ok) throw new Error("prompt fill verification failed: input remained empty after write");
       return true;
     }
@@ -330,12 +337,12 @@
         if (Log && Log.warn) Log.warn("[SN Flow] prompt insert strategy declined", { name: s.name });
         continue;
       }
-      const ok = await pollForCommit(el, text, 800);
+      const ok = await pollForCommit(el, text, Math.round(1500 * mult));
       if (ok) {
-        if (Log && Log.log) Log.log("[SN Flow] prompt fill ok", { strategy: s.name, len: text.length });
+        if (Log && Log.log) Log.log("prompt fill ok", { strategy: s.name, len: text.length });
         return true;
       }
-      if (Log && Log.warn) Log.warn("[SN Flow] prompt insert strategy did not commit; trying next", { name: s.name });
+      if (Log && Log.warn) Log.warn("prompt insert strategy did not commit; trying next", { name: s.name });
       // Re-clear before the next strategy so we don't append on top of a
       // partial first attempt. Slate-safe path only.
       slateSafeClear(el);

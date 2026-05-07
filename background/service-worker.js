@@ -17,6 +17,7 @@ self.importScripts(
   "../core/queue-manager.js",
   "../core/prompt-parser.js",
   "../core/pacing.js",
+  "../core/diagnostics.js",
   "./network-sniffer.js",
 );
 
@@ -28,6 +29,7 @@ const Filename = self.SNFlowFilename;
 const DownloadPath = self.SNFlowDownloadPath;
 const Pacing = self.SNFlowPacing;
 const Sniffer = self.SNFlowSniffer;
+const Diagnostics = self.SNFlowDiagnostics;
 
 // in-memory loop guard (per worker lifetime) and shared pacer
 let loopRunning = false;
@@ -111,36 +113,50 @@ async function pingContent(tabId) {
   } catch (_) { return null; }
 }
 
-async function ensureContentInjected(tabId) {
-  const ok = await pingContent(tabId);
-  if (ok) return true;
-  // try programmatic injection as a fallback
+// Single source of truth for the content-script file list — must stay in
+// sync with manifest.json's content_scripts.js array. Both the run loop
+// (ensureContentInjected) and the System Check (SN_FLOW_REINJECT) load
+// these on demand when the auto-injected scripts are missing.
+const CONTENT_SCRIPT_FILES = [
+  "core/logger.js",
+  "core/retry.js",
+  "core/filename-template.js",
+  "core/download-path.js",
+  "core/pacing.js",
+  "core/diagnostics.js",
+  "content/flow-detector.js",
+  "content/flow-settings.js",
+  "content/prompt-input.js",
+  "content/generate-button.js",
+  "content/flow-add-media.js",
+  "content/result-watcher.js",
+  "content/downloader.js",
+  "content/dom-error-watcher.js",
+  "content/floating-monitor.js",
+  "content/content.js",
+];
+const CONTENT_SCRIPT_CSS = ["content/floating-monitor.css"];
+
+async function injectContentScripts(tabId) {
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: [
-        "core/logger.js",
-        "core/retry.js",
-        "core/filename-template.js",
-        "core/download-path.js",
-        "core/pacing.js",
-        "content/flow-detector.js",
-        "content/flow-settings.js",
-        "content/prompt-input.js",
-        "content/generate-button.js",
-        "content/flow-add-media.js",
-        "content/result-watcher.js",
-        "content/downloader.js",
-        "content/dom-error-watcher.js",
-        "content/floating-monitor.js",
-        "content/content.js",
-      ],
+      files: CONTENT_SCRIPT_FILES,
     });
-    await chrome.scripting.insertCSS({ target: { tabId }, files: ["content/floating-monitor.css"] });
+    await chrome.scripting.insertCSS({ target: { tabId }, files: CONTENT_SCRIPT_CSS });
+    return { ok: true };
   } catch (e) {
-    Log.warn("ensureContentInjected: scripting.executeScript failed", String(e && e.message || e));
-    return false;
+    const msg = String(e && e.message || e);
+    Log.warn("injectContentScripts: scripting.executeScript failed", msg);
+    return { ok: false, error: msg };
   }
+}
+
+async function ensureContentInjected(tabId) {
+  const ok = await pingContent(tabId);
+  if (ok) return true;
+  const r = await injectContentScripts(tabId);
+  if (!r.ok) return false;
   await Retry.sleep(500);
   return !!(await pingContent(tabId));
 }
@@ -660,6 +676,36 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       } catch (e) {
         sendResponse({ ok: false, error: String((e && e.message) || e) });
       }
+    })();
+    return true;
+  }
+
+  // -------- System Check / Compatibility Test --------
+  // The popup builds the full report; we contribute the background-side
+  // checks (manifest version, downloads API, storage write probe, etc.).
+  if (msg.type === "SN_FLOW_DIAGNOSE") {
+    (async () => {
+      try {
+        const checks = Diagnostics ? await Diagnostics.collectBackground() : [];
+        sendResponse({ ok: true, checks });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e && e.message || e) });
+      }
+    })();
+    return true;
+  }
+
+  // Force reinject the content scripts into a tab. Used by the System
+  // Check "Reinject Content Script" button when SN_FLOW_PING fails.
+  if (msg.type === "SN_FLOW_REINJECT") {
+    (async () => {
+      const tabId = (msg.payload && msg.payload.tabId) || (sender && sender.tab && sender.tab.id);
+      if (!tabId) { sendResponse({ ok: false, error: "no tabId" }); return; }
+      const r = await injectContentScripts(tabId);
+      if (!r.ok) { sendResponse({ ok: false, error: r.error }); return; }
+      await Retry.sleep(500);
+      const ping = await pingContent(tabId);
+      sendResponse({ ok: !!ping, ping });
     })();
     return true;
   }

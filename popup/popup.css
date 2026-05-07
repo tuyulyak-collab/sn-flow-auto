@@ -619,6 +619,99 @@ html, body {
   min-width: 88px;
 }
 
+/* System Check / Compatibility Test modal — wider than the confirm dialog
+ * because it needs to host a copyable report textarea. Mirrors the cream
+ * + coral palette used elsewhere; the verdict line at the top changes
+ * colour with severity (ok / warn / fail). */
+.snf-dialog.snf-syscheck {
+  width: 396px;
+  max-width: calc(100vw - 16px);
+  padding: 0;
+}
+.snf-syscheck-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, #e1eec3 0%, #f05053 100%);
+  border-bottom: 1px solid rgba(240, 80, 83, 0.22);
+}
+.snf-syscheck-head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  color: #4a1c1c;
+}
+.snf-syscheck-head .snf-icon-action {
+  flex-direction: row;
+  min-width: 32px;
+  padding: 4px 8px;
+}
+.snf-syscheck-body {
+  padding: 12px 14px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.snf-syscheck-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(225, 238, 195, 0.55) 0%, rgba(255, 244, 232, 0.85) 100%);
+  border: 1px solid rgba(240, 80, 83, 0.18);
+}
+.snf-syscheck-verdict {
+  font-size: 13px;
+  font-weight: 800;
+  color: #4a1c1c;
+  letter-spacing: 0.2px;
+}
+.snf-syscheck-verdict.snf-ok    { color: #2f7a2f; }
+.snf-syscheck-verdict.snf-warn  { color: #8a4a00; }
+.snf-syscheck-verdict.snf-fail  { color: #8a1a1a; }
+.snf-syscheck-meta {
+  font-size: 11px;
+  color: #6b4242;
+}
+.snf-syscheck-slow {
+  align-items: flex-start;
+  gap: 8px;
+}
+.snf-switch-text {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #4a1c1c;
+}
+.snf-switch-text .snf-meta {
+  font-weight: 500;
+  color: #6b4242;
+}
+.snf-syscheck-report {
+  width: 100%;
+  height: 220px;
+  resize: vertical;
+  border-radius: 10px;
+  border: 1px solid rgba(240, 80, 83, 0.20);
+  background: #2b1a1a;
+  color: #ffe7c2;
+  padding: 8px 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  white-space: pre;
+  overflow: auto;
+}
+.snf-syscheck-foot {
+  display: flex;
+  gap: 8px;
+  padding: 10px 14px 14px;
+  flex-wrap: wrap;
+}
+.snf-syscheck-foot .snf-btn { min-width: 92px; flex: 1 1 auto; }
+
 /* Chain (Image → Video) settings panel — appears between mode/aspect/output
  * and the prompts textarea when Mode = "Chain". Slightly indented panel
  * inside the same card so it visually groups with the mode controls. */

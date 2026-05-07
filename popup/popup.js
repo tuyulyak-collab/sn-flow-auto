@@ -944,11 +944,281 @@
       window.close();
     }
   }
+  // ---- System Check / Compatibility Test ----
+  // The popup gathers diagnostics from three places:
+  //   1. The popup itself (this PC's chrome.tabs API + active tab info)
+  //   2. The service worker (manifest, downloads API, storage write probe)
+  //   3. The Flow content script (prompt input, generate button, result area)
+  //
+  // The whole thing is best-effort: if any leg times out, we still render
+  // the rest of the report so the user (and we) can see *which* leg fell
+  // over. Each rendered line uses a uniform [STATUS] label so the user
+  // can copy-paste the report into chat without further formatting.
+  const Diagnostics = self.SNFlowDiagnostics;
+
+  function setSysVerdict(text, severity) {
+    if (!els.sysVerdict) return;
+    els.sysVerdict.textContent = text;
+    els.sysVerdict.classList.remove("snf-ok", "snf-warn", "snf-fail");
+    if (severity) els.sysVerdict.classList.add("snf-" + severity);
+  }
+
+  // Roundtrip a message to the active tab with a hard timeout so a missing
+  // content script can't hang the System Check forever.
+  function sendTabMessageWithTimeout(tabId, msg, timeoutMs) {
+    return new Promise((resolve) => {
+      let done = false;
+      const timer = setTimeout(() => {
+        if (done) return;
+        done = true;
+        resolve({ ok: false, error: "timeout after " + timeoutMs + "ms" });
+      }, timeoutMs);
+      try {
+        chrome.tabs.sendMessage(tabId, msg, (resp) => {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          const lastErr = chrome.runtime && chrome.runtime.lastError;
+          if (lastErr) resolve({ ok: false, error: lastErr.message || String(lastErr) });
+          else resolve(resp || { ok: false, error: "no response" });
+        });
+      } catch (e) {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve({ ok: false, error: String((e && e.message) || e) });
+      }
+    });
+  }
+
+  // Same idea for chrome.runtime.sendMessage (popup → service worker).
+  function sendRuntimeMessageWithTimeout(msg, timeoutMs) {
+    return new Promise((resolve) => {
+      let done = false;
+      const timer = setTimeout(() => {
+        if (done) return;
+        done = true;
+        resolve({ ok: false, error: "timeout after " + timeoutMs + "ms" });
+      }, timeoutMs);
+      try {
+        chrome.runtime.sendMessage(msg, (resp) => {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          const lastErr = chrome.runtime && chrome.runtime.lastError;
+          if (lastErr) resolve({ ok: false, error: lastErr.message || String(lastErr) });
+          else resolve(resp || { ok: false, error: "no response" });
+        });
+      } catch (e) {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve({ ok: false, error: String((e && e.message) || e) });
+      }
+    });
+  }
+
+  // Pick the tab to diagnose: prefer the active tab in the current window,
+  // fall back to the highest-priority Flow tab if the active one isn't a
+  // Flow tab (e.g. user opened the popup over chrome://extensions).
+  function findDiagnosticTab() {
+    return new Promise((resolve) => {
+      try {
+        chrome.tabs.query({}, (tabs) => {
+          const all = tabs || [];
+          const active = all.find((t) => t.active && t.lastFocusedWindow);
+          const flowRe = /(labs\.google|flow\.google|aitestkitchen\.withgoogle\.com)/i;
+          const isFlow = (t) => t && t.url && flowRe.test(t.url);
+          if (isFlow(active)) { resolve(active); return; }
+          const flowTab = all.find(isFlow);
+          resolve(flowTab || active || (all[0] || null));
+        });
+      } catch (_) { resolve(null); }
+    });
+  }
+
+  function openSystemCheck() {
+    if (!els.sysDialog) return;
+    // Restore the saved Slow PC mode toggle so the modal reflects what
+    // the run loop will actually use.
+    Storage.getSettings().then((s) => {
+      if (els.sysSlow) els.sysSlow.checked = !!(s && s.slowMode);
+    }).catch(() => {});
+    setSysVerdict("Idle — click 'Run Check' to gather diagnostics.", "");
+    if (els.sysMeta) els.sysMeta.textContent = "";
+    if (els.sysReport) els.sysReport.value = "";
+    if (els.sysCopy) els.sysCopy.disabled = true;
+    if (els.sysReinject) els.sysReinject.disabled = true;
+    try { els.sysDialog.showModal(); } catch (_) { try { els.sysDialog.show(); } catch (__) {} }
+  }
+
+  function closeSystemCheck() {
+    if (!els.sysDialog) return;
+    try { els.sysDialog.close(); } catch (_) {}
+  }
+
+  async function runSystemCheck() {
+    if (!Diagnostics) {
+      setSysVerdict("Diagnostics module missing — reinstall the extension.", "fail");
+      return;
+    }
+    if (els.sysRun) els.sysRun.disabled = true;
+    if (els.sysCopy) els.sysCopy.disabled = true;
+    if (els.sysReinject) els.sysReinject.disabled = true;
+    setSysVerdict("Running diagnostics…", "");
+    if (els.sysReport) els.sysReport.value = "Running…\n";
+
+    const sections = [];
+
+    // ---- Section 1: popup-side checks ----
+    const popupChecks = [];
+    try {
+      const tab = await findDiagnosticTab();
+      if (tab) {
+        popupChecks.push(Diagnostics.check("popup.tab", "Active Tab",
+          /labs\.google|flow\.google|aitestkitchen/.test(tab.url || "") ? "ok" : "fail",
+          (tab.url || "(no url)") + (tab.title ? "  — " + tab.title : "")));
+        popupChecks.push(Diagnostics.check("popup.tab_id", "Active Tab Id", "info", String(tab.id)));
+      } else {
+        popupChecks.push(Diagnostics.check("popup.tab", "Active Tab", "fail", "no tab found"));
+      }
+      popupChecks.push(Diagnostics.check(
+        "popup.runtime",
+        "chrome.runtime / chrome.tabs APIs",
+        (chrome.runtime && chrome.tabs) ? "ok" : "fail",
+        "popup has access to messaging APIs",
+      ));
+    } catch (e) {
+      popupChecks.push(Diagnostics.check("popup.error", "Popup Diagnostics", "fail", String((e && e.message) || e)));
+    }
+    sections.push({ title: "Popup", checks: popupChecks });
+
+    // ---- Section 2: background / service-worker checks ----
+    const bgResp = await sendRuntimeMessageWithTimeout({ type: "SN_FLOW_DIAGNOSE" }, 6000);
+    if (bgResp && bgResp.ok && Array.isArray(bgResp.checks)) {
+      sections.push({ title: "Background / Service Worker", checks: bgResp.checks });
+    } else {
+      sections.push({
+        title: "Background / Service Worker",
+        checks: [Diagnostics.check(
+          "bg.unreachable",
+          "Service Worker Diagnostics",
+          "fail",
+          (bgResp && bgResp.error) || "service worker did not respond — try reloading the extension at chrome://extensions",
+        )],
+      });
+    }
+
+    // ---- Section 3: page (content-script) checks ----
+    const tab = await findDiagnosticTab();
+    let pageChecks = [];
+    let needReinject = false;
+    if (!tab || !tab.id) {
+      pageChecks.push(Diagnostics.check("page.tab", "Tab", "fail", "no active tab"));
+    } else if (!/labs\.google|flow\.google|aitestkitchen/.test(tab.url || "")) {
+      pageChecks.push(Diagnostics.check(
+        "page.url_mismatch",
+        "Tab URL",
+        "fail",
+        "open a Google Flow tab first (https://labs.google/fx/tools/flow). Currently on: " + (tab.url || "?"),
+      ));
+    } else {
+      // First try to talk to the existing content script.
+      const pageResp = await sendTabMessageWithTimeout(tab.id, { type: "SN_FLOW_DIAGNOSE_PAGE" }, 4000);
+      if (pageResp && pageResp.ok && Array.isArray(pageResp.checks)) {
+        pageChecks = pageResp.checks;
+      } else {
+        // Content script unreachable — surface this as a single failed check
+        // and enable the "Reinject Content Script" button.
+        needReinject = true;
+        pageChecks.push(Diagnostics.check(
+          "page.content_script",
+          "Content Script Reachable",
+          "fail",
+          (pageResp && pageResp.error) || "content script did not respond — click Reinject Content Script below",
+        ));
+      }
+    }
+    sections.push({ title: "Flow Tab / Page", checks: pageChecks });
+
+    // ---- Render ----
+    const all = [];
+    for (const s of sections) for (const c of (s.checks || [])) all.push(c);
+    const summary = Diagnostics.summarize(all);
+    const report = {
+      generatedAt: new Date().toISOString(),
+      summary: summary.verdict,
+      sections,
+    };
+    const text = Diagnostics.formatText(report);
+    if (els.sysReport) els.sysReport.value = text;
+    setSysVerdict(summary.verdict,
+      summary.fail > 0 ? "fail" : (summary.warn > 0 ? "warn" : "ok"));
+    if (els.sysMeta) {
+      els.sysMeta.textContent =
+        "ok=" + summary.ok + " · warn=" + summary.warn + " · fail=" + summary.fail
+        + " · info=" + summary.info + " · " + report.generatedAt;
+    }
+    if (els.sysCopy) els.sysCopy.disabled = false;
+    if (els.sysReinject) els.sysReinject.disabled = !needReinject;
+    if (els.sysRun) els.sysRun.disabled = false;
+  }
+
+  async function copySystemCheckReport() {
+    if (!els.sysReport) return;
+    const text = els.sysReport.value || "";
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      const orig = els.sysCopy.textContent;
+      els.sysCopy.textContent = "Copied!";
+      setTimeout(() => { els.sysCopy.textContent = orig; }, 1200);
+    } catch (_) {
+      // Clipboard API may be blocked in popups in some Chrome flag combos —
+      // fall back to selectAll so the user can Ctrl+C manually.
+      try { els.sysReport.focus(); els.sysReport.select(); } catch (__) {}
+    }
+  }
+
+  async function reinjectContentScript() {
+    if (!els.sysReinject) return;
+    els.sysReinject.disabled = true;
+    const tab = await findDiagnosticTab();
+    if (!tab || !tab.id) {
+      els.sysReinject.disabled = false;
+      return;
+    }
+    const resp = await sendRuntimeMessageWithTimeout(
+      { type: "SN_FLOW_REINJECT", payload: { tabId: tab.id } }, 8000,
+    );
+    // Re-run the check so the report reflects the new state.
+    await runSystemCheck();
+    if (!resp || !resp.ok) {
+      // Still surface the explicit failure on top of the refreshed report.
+      setSysVerdict("Reinject failed: " + ((resp && resp.error) || "unknown"), "fail");
+    }
+  }
+
+  async function setSlowMode(on) {
+    try {
+      await Storage.setSettings({
+        slowMode: !!on,
+        compatTimeoutMultiplier: on ? 2.0 : 1.0,
+      });
+    } catch (_) {}
+  }
+
   function bindHeaderActions() {
     if (els.openSettings) els.openSettings.addEventListener("click", openSettings);
     if (els.settingsBack) els.settingsBack.addEventListener("click", closeSettings);
     if (els.settingsClose) els.settingsClose.addEventListener("click", closeSettings);
     if (els.openFloating) els.openFloating.addEventListener("click", openFloatingPanel);
+    if (els.systemCheck) els.systemCheck.addEventListener("click", openSystemCheck);
+    if (els.sysClose) els.sysClose.addEventListener("click", closeSystemCheck);
+    if (els.sysRun) els.sysRun.addEventListener("click", runSystemCheck);
+    if (els.sysCopy) els.sysCopy.addEventListener("click", copySystemCheckReport);
+    if (els.sysReinject) els.sysReinject.addEventListener("click", reinjectContentScript);
+    if (els.sysSlow) els.sysSlow.addEventListener("change", () => setSlowMode(els.sysSlow.checked));
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && els.settingsPanel && !els.settingsPanel.hidden) {
         closeSettings();
@@ -1005,6 +1275,17 @@
       settingsPanel: $("snf-settings-panel"),
       settingsBack: $("snf-settings-back"),
       settingsClose: $("snf-settings-close"),
+      // System Check / Compatibility Test modal
+      systemCheck: $("snf-system-check"),
+      sysDialog: $("snf-syscheck"),
+      sysClose: $("snf-syscheck-close"),
+      sysVerdict: $("snf-syscheck-verdict"),
+      sysMeta: $("snf-syscheck-meta"),
+      sysReport: $("snf-syscheck-report"),
+      sysSlow: $("snf-syscheck-slow-mode"),
+      sysRun: $("snf-syscheck-run"),
+      sysCopy: $("snf-syscheck-copy"),
+      sysReinject: $("snf-syscheck-reinject"),
       // download settings (PR #15 + PR #16 UX polish — progressive disclosure)
       defaultPreviewName: $("snf-default-preview-name"),
       defaultPreviewFolder: $("snf-default-preview-folder"),
